@@ -19,13 +19,14 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
     ldflags:
       - -s -w
       - -X github.com/cloudygreybeard/hack/cmd.Version={{.Version}}
-      - -X github.com/cloudygreybeard/hack/cmd.Commit={{.ShortCommit}}
+      - -X github.com/cloudygreybeard/hack/cmd.Commit={{.Commit}}
       - -X github.com/cloudygreybeard/hack/cmd.Date={{.Date}}
 
 archives:
@@ -33,6 +34,10 @@ archives:
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     files:
       - LICENSE
       - README.md
@@ -45,24 +50,13 @@ snapshot:
 
 changelog:
   sort: asc
-  use: github
   filters:
     exclude:
       - "^docs:"
       - "^test:"
       - "^chore:"
-      - "^ci:"
       - "Merge pull request"
       - "Merge branch"
-  groups:
-    - title: Features
-      regexp: '^feat(\(.+\))?:'
-      order: 0
-    - title: Bug Fixes
-      regexp: '^fix(\(.+\))?:'
-      order: 1
-    - title: Others
-      order: 999
 
 release:
   github:
