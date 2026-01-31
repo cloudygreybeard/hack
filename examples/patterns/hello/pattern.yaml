@@ -1,0 +1,9 @@
+name: hello
+description: Minimal example pattern demonstrating hack's template system
+variables:
+  - name: name
+    description: Project name
+    required: true
+  - name: author
+    description: Author name
+    default: "Your Name"

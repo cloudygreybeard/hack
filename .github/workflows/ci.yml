@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux x86_64
+          - os: macos-latest
+            name: macOS ARM64
+
+    runs-on: ${{ matrix.os }}
+    name: Test (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build
+        run: go build -o hack .
+
+      - name: Verify version
+        run: ./hack version
+
+      - name: Verify help
+        run: ./hack --help
+
+      - name: Functional test - list
+        run: |
+          # List should work even with empty directory
+          mkdir -p /tmp/test-hack-root
+          ./hack list --root-dir /tmp/test-hack-root
+
+      - name: Functional test - create
+        run: |
+          # Create should work
+          result=$(./hack create test-workspace --root-dir /tmp/test-hack-root --no-edit)
+          if [ ! -d "$result" ]; then
+            echo "FAIL: workspace not created"
+            exit 1
+          fi
+          if [ ! -f "$result/README.md" ]; then
+            echo "FAIL: README.md not created"
+            exit 1
+          fi
+          echo "Workspace created at: $result"
+
+      - name: Functional test - pattern list
+        run: |
+          # Pattern list should work (even with no patterns)
+          ./hack pattern list --patterns-dir /tmp/test-patterns || true
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest

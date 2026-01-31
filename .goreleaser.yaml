@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+project_name: hack
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: hack
+    main: .
+    binary: hack
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/cloudygreybeard/hack/cmd.Version={{.Version}}
+      - -X github.com/cloudygreybeard/hack/cmd.Commit={{.ShortCommit}}
+      - -X github.com/cloudygreybeard/hack/cmd.Date={{.Date}}
+
+archives:
+  - id: hack
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?:'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^fix(\(.+\))?:'
+      order: 1
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: cloudygreybeard
+    name: hack
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+
+# Homebrew tap configuration
+# Note: We use a separate workflow step with SSH auth instead of GoReleaser's
+# built-in brews feature, for consistency with other cloudygreybeard packages.
+# See .github/workflows/release.yml for the homebrew tap update logic.
