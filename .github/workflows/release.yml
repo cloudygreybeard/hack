@@ -54,11 +54,25 @@ jobs:
         run: |
           VERSION=${{ steps.release.outputs.version }}
           
-          # Wait for release assets to be available
-          sleep 10
+          # Wait for release assets with retry
+          for i in 1 2 3 4 5 6; do
+            echo "Attempt $i: downloading checksums..."
+            if curl -sfL "https://github.com/cloudygreybeard/hack/releases/download/v${VERSION}/checksums.txt" -o checksums.txt; then
+              if [ -s checksums.txt ]; then
+                echo "Downloaded checksums.txt successfully"
+                cat checksums.txt
+                break
+              fi
+            fi
+            echo "Waiting 15 seconds..."
+            sleep 15
+          done
           
-          # Download checksums file
-          curl -sL "https://github.com/cloudygreybeard/hack/releases/download/v${VERSION}/checksums.txt" -o checksums.txt
+          # Verify we have the file with content
+          if [ ! -s checksums.txt ]; then
+            echo "Failed to download checksums.txt"
+            exit 1
+          fi
           
           # Extract SHA256 for each platform
           echo "darwin_amd64_sha=$(grep "hack_${VERSION}_darwin_amd64.tar.gz" checksums.txt | awk '{print $1}')" >> $GITHUB_OUTPUT
