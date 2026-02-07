@@ -19,12 +19,17 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cloudygreybeard/hack/internal/config"
+	"github.com/cloudygreybeard/hack/internal/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+var verbosity int
+var quiet bool
 
 // Version information set via ldflags at build time.
 var (
@@ -32,6 +37,7 @@ var (
 	Commit  = "unknown"
 	Date    = "unknown"
 )
+
 
 var rootCmd = &cobra.Command{
 	Use:   "hack [filter]",
@@ -50,6 +56,12 @@ and command-line flags.`,
 	Args:               cobra.MaximumNArgs(1),
 	DisableFlagParsing: false,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Set log verbosity
+		if quiet {
+			log.SetLevel(log.LevelQuiet)
+		} else {
+			log.SetVerbosity(verbosity)
+		}
 		return config.Init()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
@@ -59,7 +71,7 @@ and command-line flags.`,
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
-			fmt.Println(dir)
+			outputCdTarget(dir)
 			return
 		}
 
@@ -73,7 +85,7 @@ and command-line flags.`,
 			fmt.Fprintf(os.Stderr, "no directory matching %q found\n", filter)
 			os.Exit(1)
 		}
-		fmt.Println(dir)
+		outputCdTarget(dir)
 	},
 }
 
@@ -88,11 +100,35 @@ func init() {
 	rootCmd.PersistentFlags().String("patterns-dir", "", "directory for patterns")
 	rootCmd.PersistentFlags().String("config", "", "config file (default ~/.hack.yaml)")
 	rootCmd.PersistentFlags().BoolP("interactive", "i", false, "enable interactive mode")
+	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "increase verbosity (-v, -vv, -vvv)")
+	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "suppress informational output")
 
 	// Bind flags to viper
 	_ = viper.BindPFlag("root_dir", rootCmd.PersistentFlags().Lookup("root-dir"))
 	_ = viper.BindPFlag("patterns_dir", rootCmd.PersistentFlags().Lookup("patterns-dir"))
 	_ = viper.BindPFlag("interactive", rootCmd.PersistentFlags().Lookup("interactive"))
+}
+
+// outputCdTarget writes a path to a file descriptor specified by HACK_CD_FD
+// (for shell wrapper), otherwise falls back to stdout. This allows the shell
+// wrapper to capture the cd target while leaving stdout free for interactive
+// use (editor).
+func outputCdTarget(path string) {
+	if fdStr := os.Getenv("HACK_CD_FD"); fdStr != "" {
+		if fdNum, err := strconv.Atoi(fdStr); err == nil && fdNum > 2 {
+			fd := os.NewFile(uintptr(fdNum), "cd_target")
+			if fd != nil {
+				if _, err := fd.Stat(); err == nil {
+					fmt.Fprintln(fd, path)
+					fd.Close()
+					return
+				}
+				fd.Close()
+			}
+		}
+	}
+	// Fall back to stdout
+	fmt.Println(path)
 }
 
 // getMostRecentDir returns the most recently modified directory in rootDir.

@@ -25,6 +25,8 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/cloudygreybeard/hack/internal/log"
+	"github.com/cloudygreybeard/hack/internal/security"
 	"gopkg.in/yaml.v3"
 )
 
@@ -90,10 +92,24 @@ func Load(patternPath string) (Pattern, error) {
 	return p, nil
 }
 
+// ApplyOptions configures pattern application behavior.
+type ApplyOptions struct {
+	SkipExisting bool // Don't overwrite existing files
+}
+
 // Apply copies a pattern to the destination directory, processing templates.
 func Apply(patternsDir, patternName, destDir string, vars map[string]string) error {
+	return ApplyWithOptions(patternsDir, patternName, destDir, vars, ApplyOptions{})
+}
+
+// ApplyWithOptions copies a pattern with configurable options.
+func ApplyWithOptions(patternsDir, patternName, destDir string, vars map[string]string, opts ApplyOptions) error {
 	patternPath := filepath.Join(patternsDir, patternName)
 	templateDir := filepath.Join(patternPath, "template")
+
+	log.Verbose("applying pattern %q to %s", patternName, destDir)
+	log.Debug("pattern path: %s", patternPath)
+	log.Debug("template dir: %s", templateDir)
 
 	// Check if pattern exists
 	if _, err := os.Stat(patternPath); os.IsNotExist(err) {
@@ -105,8 +121,16 @@ func Apply(patternsDir, patternName, destDir string, vars map[string]string) err
 		return fmt.Errorf("pattern %q has no template directory", patternName)
 	}
 
+	// Resolve destination directory to absolute path for security checks
+	absDestDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("resolving destination path: %w", err)
+	}
+
+	var filesCreated, filesSkipped int
+
 	// Walk the template directory and copy files
-	return filepath.WalkDir(templateDir, func(srcPath string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(templateDir, func(srcPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -128,14 +152,44 @@ func Apply(patternsDir, patternName, destDir string, vars map[string]string) err
 			return fmt.Errorf("processing path %q: %w", relPath, err)
 		}
 
-		destPath := filepath.Join(destDir, destRelPath)
+		destPath := filepath.Join(absDestDir, destRelPath)
 
-		if d.IsDir() {
-			return os.MkdirAll(destPath, 0755)
+		// Security: Validate the destination path is within the target directory
+		if err := security.EnsurePathSafe(absDestDir, destPath); err != nil {
+			return fmt.Errorf("path safety check failed for %q: %w", destRelPath, err)
 		}
 
-		return copyFile(srcPath, destPath, vars)
+		if d.IsDir() {
+			if err := os.MkdirAll(destPath, 0755); err != nil {
+				return err
+			}
+			log.DirCreated(destRelPath)
+			return nil
+		}
+
+		// Skip existing files if requested
+		if opts.SkipExisting {
+			if _, err := os.Stat(destPath); err == nil {
+				log.FileSkipped(destRelPath, "already exists")
+				filesSkipped++
+				return nil
+			}
+		}
+
+		if err := copyFile(srcPath, destPath, vars); err != nil {
+			return err
+		}
+		log.FileCreated(destRelPath)
+		filesCreated++
+		return nil
 	})
+
+	if walkErr != nil {
+		return walkErr
+	}
+
+	log.Verbose("pattern applied: %d files created, %d skipped", filesCreated, filesSkipped)
+	return nil
 }
 
 // Install copies a pattern from srcPath to the patterns directory.
@@ -209,6 +263,8 @@ func copyFile(src, dest string, vars map[string]string) error {
 
 // processTemplate reads a template file, processes it, and writes the result.
 func processTemplate(src, dest string, vars map[string]string, mode fs.FileMode) error {
+	log.TemplateProcessed(filepath.Base(src), filepath.Base(dest))
+
 	content, err := os.ReadFile(src)
 	if err != nil {
 		return err
