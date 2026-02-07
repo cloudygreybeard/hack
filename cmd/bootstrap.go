@@ -201,27 +201,29 @@ func isSnippetInstalled(rcFile string) bool {
 
 const bashSnippet = `# hack shell integration
 hack() {
-    local result
-    result=$(command hack "$@")
+    local cd_target
+    local _hack_fd=63
+    # Save stdout to temp fd, capture cd target fd, restore stdout
+    eval "exec $_hack_fd>&1"
+    cd_target=$(HACK_CD_FD=$_hack_fd command hack "$@" $_hack_fd>&1 1>&$_hack_fd 2>&1)
     local exit_code=$?
+    eval "exec $_hack_fd>&-"
 
-    if [[ $exit_code -eq 0 && -d "$result" ]]; then
-        cd "$result"
-    elif [[ -n "$result" ]]; then
-        echo "$result"
+    if [[ $exit_code -eq 0 && -n "$cd_target" && -d "$cd_target" ]]; then
+        cd "$cd_target"
     fi
     return $exit_code
 }`
 
 const fishSnippet = `# hack shell integration
 function hack
-    set -l result (command hack $argv)
+    set -l _hack_fd 63
+    # Capture cd target on high fd, leave stdout/stderr for interactive use
+    set -l cd_target (begin; env HACK_CD_FD=$_hack_fd command hack $argv $_hack_fd>&1 1>&$_hack_fd 2>&1; end)
     set -l exit_code $status
 
-    if test $exit_code -eq 0 -a -d "$result"
-        cd "$result"
-    else if test -n "$result"
-        echo "$result"
+    if test $exit_code -eq 0 -a -n "$cd_target" -a -d "$cd_target"
+        cd "$cd_target"
     end
     return $exit_code
 end`
