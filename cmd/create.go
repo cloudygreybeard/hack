@@ -196,6 +196,13 @@ func applyPatternWithPrompt(workspaceName, appName, datePrefix, fullPath string,
 		"module":   module,
 	}
 
+	// Apply pattern-defined defaults for variables not already set
+	for _, v := range p.Variables {
+		if _, ok := vars[v.Name]; !ok && v.Default != "" {
+			vars[v.Name] = v.Default
+		}
+	}
+
 	// Interactive mode: prompt for additional variables
 	if config.C.Interactive && len(p.Variables) > 0 {
 		vars, err = prompt.PatternVariables(p, vars)
