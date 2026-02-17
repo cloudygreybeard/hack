@@ -28,6 +28,8 @@ type Config struct {
 	RootDir      string `mapstructure:"root_dir"`
 	PatternsDir  string `mapstructure:"patterns_dir"`
 	Editor       string `mapstructure:"editor"`
+	IDE          string `mapstructure:"ide"`
+	EditMode     string `mapstructure:"edit_mode"`
 	GitInit      bool   `mapstructure:"git_init"`
 	CreateReadme bool   `mapstructure:"create_readme"`
 	Interactive  bool   `mapstructure:"interactive"`
@@ -48,6 +50,8 @@ func Init() error {
 	viper.SetDefault("root_dir", filepath.Join(home, "hack"))
 	viper.SetDefault("patterns_dir", filepath.Join(home, ".hack", "patterns"))
 	viper.SetDefault("editor", getDefaultEditor())
+	viper.SetDefault("ide", "")
+	viper.SetDefault("edit_mode", "auto")
 	viper.SetDefault("git_init", true)
 	viper.SetDefault("create_readme", true)
 	viper.SetDefault("interactive", false)

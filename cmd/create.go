@@ -41,7 +41,7 @@ var (
 
 var createCmd = &cobra.Command{
 	Use:     "create <workspace-name>",
-	Aliases: []string{"c", "new", "edit", "e"},
+	Aliases: []string{"c", "new"},
 	Short:   "Create a new hack workspace or add an app to existing one",
 	Long: `Create a hack workspace with today's date prefix.
 
@@ -147,12 +147,12 @@ Examples:
 			}
 		}
 
-		// Output the path (to fd 3 if available, otherwise stdout)
+		// Output the path (via HACK_CD_FD if available, otherwise stdout)
 		outputCdTarget(fullPath)
 
-		// Open editor if not disabled
+		// Open editor/IDE if not disabled
 		if !createNoEdit {
-			openEditor(fullPath)
+			openWorkspace(fullPath, "")
 		}
 	},
 }
@@ -224,31 +224,6 @@ func initGit(dir string) error {
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-func openEditor(dir string) {
-	// Only open editor if stdin is a terminal
-	stdinInfo, err := os.Stdin.Stat()
-	if err != nil || (stdinInfo.Mode()&os.ModeCharDevice) == 0 {
-		log.Debug("skipping editor: stdin is not a terminal")
-		return
-	}
-
-	readmePath := filepath.Join(dir, "README.md")
-
-	// Check if README exists
-	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
-		log.Debug("skipping editor: README.md does not exist")
-		return
-	}
-
-	log.Debug("opening editor: %s %s", config.C.Editor, readmePath)
-	cmd := exec.Command(config.C.Editor, readmePath)
-	cmd.Dir = dir
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
 }
 
 // toTitle converts a hyphenated name to TitleCase for use in class names.
