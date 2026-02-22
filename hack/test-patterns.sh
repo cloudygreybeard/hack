@@ -214,6 +214,127 @@ test_verbose_output() {
     fi
 }
 
+# Test: Workspace labels via hack label
+test_labels() {
+    local name="test-labels"
+    log_info "Testing: workspace labels"
+    
+    if ! "$HACK_BIN" create "$name" -p aro-refs --no-git --no-edit -q >/dev/null 2>&1; then
+        log_fail "labels - workspace creation failed"
+        return
+    fi
+    
+    local ws_dir
+    ws_dir=$(find "$TEST_DIR" -maxdepth 1 -type d -name "*.$name" | head -1)
+    
+    # Check .hack.yaml was created
+    if [[ ! -f "$ws_dir/.hack.yaml" ]]; then
+        log_fail "labels - .hack.yaml not created"
+        return
+    fi
+    
+    # Check hack.dev/pattern label was set
+    if grep -q "hack.dev/pattern" "$ws_dir/.hack.yaml"; then
+        log_pass "workspace .hack.yaml created with pattern label"
+    else
+        log_fail "labels - missing hack.dev/pattern label"
+    fi
+}
+
+# Test: Label selector filtering
+test_label_selector() {
+    local name="test-label-sel"
+    log_info "Testing: label selector filtering"
+    
+    "$HACK_BIN" create "$name" -p go-cli --no-git --no-edit -q --label domain=test >/dev/null 2>&1
+    
+    local output
+    output=$("$HACK_BIN" list -l domain=test 2>&1)
+    
+    if echo "$output" | grep -q "$name"; then
+        log_pass "label selector filters correctly"
+    else
+        log_fail "label selector - workspace not found with selector"
+    fi
+}
+
+# Test: Pattern inheritance (aro-local-dev inherits aro-refs)
+test_inheritance() {
+    local name="test-inherit"
+    log_info "Testing: pattern inheritance"
+    
+    if "$HACK_BIN" create "$name" -p aro-local-dev --no-git --no-edit -q >/dev/null 2>&1; then
+        local ws_dir
+        ws_dir=$(find "$TEST_DIR" -maxdepth 1 -type d -name "*.$name" | head -1)
+        
+        # aro-refs provides CLAUDE.md and README.md; aro-local-dev adds hack/setup.sh
+        if [[ -f "$ws_dir/CLAUDE.md" ]] && [[ -f "$ws_dir/hack/setup.sh" ]]; then
+            log_pass "pattern inheritance applies base and child"
+        else
+            log_fail "inheritance - missing files from base or child pattern"
+        fi
+    else
+        log_fail "inheritance - creation failed"
+    fi
+}
+
+# Test: Dry-run mode
+test_dry_run() {
+    log_info "Testing: dry-run mode"
+    
+    local output
+    output=$("$HACK_BIN" create test-dry-run -p go-cli --dry-run 2>&1)
+    
+    # Check it prints dry-run info
+    if echo "$output" | grep -q "dry-run"; then
+        # Check no directory was created
+        if find "$TEST_DIR" -maxdepth 1 -type d -name "*test-dry-run" | grep -q .; then
+            log_fail "dry-run - directory was created"
+        else
+            log_pass "dry-run shows plan without creating files"
+        fi
+    else
+        log_fail "dry-run - no dry-run output"
+    fi
+}
+
+# Test: New patterns create successfully (go-service, go-lib, mcp-server)
+test_new_patterns() {
+    log_info "Testing: new patterns (go-service, go-lib, mcp-server)"
+    local all_ok=true
+    
+    for pat in go-service go-lib mcp-server; do
+        local pname="test-$pat"
+        if "$HACK_BIN" create "$pname" -p "$pat" --no-git --no-edit -q >/dev/null 2>&1; then
+            local ws_dir
+            ws_dir=$(find "$TEST_DIR" -maxdepth 1 -type d -name "*.$pname" | head -1)
+            if [[ -d "$ws_dir/$pname" ]]; then
+                log_pass "$pat pattern creates app directory"
+            else
+                log_fail "$pat pattern - missing app directory"
+                all_ok=false
+            fi
+        else
+            log_fail "$pat pattern - creation failed"
+            all_ok=false
+        fi
+    done
+}
+
+# Test: Pattern show displays labels and inherits
+test_pattern_show() {
+    log_info "Testing: pattern show with labels/inherits"
+    
+    local output
+    output=$("$HACK_BIN" pattern show aro-local-dev 2>&1)
+    
+    if echo "$output" | grep -q "Labels:" && echo "$output" | grep -q "Inherits:"; then
+        log_pass "pattern show displays labels and inherits"
+    else
+        log_fail "pattern show - missing labels or inherits"
+    fi
+}
+
 # Main
 main() {
     echo "========================================"
@@ -224,7 +345,7 @@ main() {
     setup
     echo ""
     
-    # Run tests
+    # Core tests
     test_aro_refs_basic
     test_aro_local_dev
     test_go_cli_basic
@@ -233,6 +354,14 @@ main() {
     test_security_path_traversal
     test_security_path_separator
     test_verbose_output
+    
+    # Metadata and inheritance tests
+    test_labels
+    test_label_selector
+    test_inheritance
+    test_dry_run
+    test_new_patterns
+    test_pattern_show
     
     echo ""
     echo "========================================"

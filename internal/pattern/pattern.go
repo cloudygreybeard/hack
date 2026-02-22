@@ -33,10 +33,26 @@ import (
 
 // Pattern represents a project pattern definition.
 type Pattern struct {
-	Name        string     `yaml:"name"`
-	Description string     `yaml:"description"`
-	Variables   []Variable `yaml:"variables"`
-	PostCreate  []string   `yaml:"post_create"`
+	Name          string            `yaml:"name"`
+	Description   string            `yaml:"description"`
+	Weight        int               `yaml:"weight"`
+	Labels        map[string]string `yaml:"labels,omitempty"`
+	DefaultLabels map[string]string `yaml:"default_labels,omitempty"`
+	Inherits      []InheritSource   `yaml:"inherits,omitempty"`
+	Variables     []Variable        `yaml:"variables"`
+	PostCreate    []string          `yaml:"post_create"`
+}
+
+// InheritSource defines a pattern inheritance reference.
+// Either Pattern (by name) or PatternSelector (by labels) is set, not both.
+type InheritSource struct {
+	Pattern         string             `yaml:"pattern,omitempty"`
+	PatternSelector *PatternSelector   `yaml:"patternSelector,omitempty"`
+}
+
+// PatternSelector selects patterns by matching labels.
+type PatternSelector struct {
+	MatchLabels map[string]string `yaml:"matchLabels"`
 }
 
 // Variable defines a template variable.

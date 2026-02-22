@@ -108,6 +108,38 @@ var patternShowCmd = &cobra.Command{
 		if p.Description != "" {
 			fmt.Printf("Description: %s\n", p.Description)
 		}
+		if p.Weight != 0 {
+			fmt.Printf("Weight:      %d\n", p.Weight)
+		}
+
+		if len(p.Labels) > 0 {
+			fmt.Println("\nLabels:")
+			for k, v := range p.Labels {
+				fmt.Printf("  %s=%s\n", k, v)
+			}
+		}
+
+		if len(p.DefaultLabels) > 0 {
+			fmt.Println("\nDefault workspace labels:")
+			for k, v := range p.DefaultLabels {
+				fmt.Printf("  %s=%s\n", k, v)
+			}
+		}
+
+		if len(p.Inherits) > 0 {
+			fmt.Println("\nInherits:")
+			for _, inh := range p.Inherits {
+				if inh.Pattern != "" {
+					fmt.Printf("  - pattern: %s\n", inh.Pattern)
+				}
+				if inh.PatternSelector != nil {
+					fmt.Printf("  - patternSelector:\n")
+					for k, v := range inh.PatternSelector.MatchLabels {
+						fmt.Printf("      %s=%s\n", k, v)
+					}
+				}
+			}
+		}
 
 		if len(p.Variables) > 0 {
 			fmt.Println("\nVariables:")
