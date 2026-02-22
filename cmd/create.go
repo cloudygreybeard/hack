@@ -27,6 +27,7 @@ import (
 	"github.com/cloudygreybeard/hack/internal/pattern"
 	"github.com/cloudygreybeard/hack/internal/prompt"
 	"github.com/cloudygreybeard/hack/internal/security"
+	"github.com/cloudygreybeard/hack/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -34,9 +35,11 @@ var (
 	createNoGit    bool
 	createNoReadme bool
 	createNoEdit   bool
+	createDryRun   bool
 	createPattern  string
 	createModule   string
 	createAppName  string
+	createLabels   []string
 )
 
 var createCmd = &cobra.Command{
@@ -62,7 +65,9 @@ Examples:
   hack create my-project -p go-cli -a myapp  # Workspace with myapp/ app inside
   hack create my-project -p go-cli -a other  # Add another app to existing workspace
   hack create my-project -p go-cli -i  # Interactive mode for variables
-  hack create foo --no-git             # Skip git initialization`,
+  hack create foo --no-git             # Skip git initialization
+  hack create foo -p go-cli --label domain=tools --label lang=go
+  hack create foo -p go-cli --dry-run  # Show what would be created`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		workspaceName := args[0]
@@ -77,7 +82,6 @@ Examples:
 		// App name defaults to workspace name
 		appName := workspaceName
 		if createAppName != "" {
-			// Validate app name if explicitly provided
 			if err := security.ValidateName(createAppName); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
@@ -90,24 +94,48 @@ Examples:
 		dirName := fmt.Sprintf("%s.%s", datePrefix, workspaceName)
 		fullPath := filepath.Join(config.C.RootDir, dirName)
 
+		// Resolve pattern inheritance chain (if pattern specified)
+		var resolved []pattern.ResolvedPattern
+		if createPattern != "" {
+			log.Verbose("resolving pattern: %s", createPattern)
+			var err error
+			resolved, err = pattern.Resolve(config.C.PatternsDir, createPattern)
+			if err != nil {
+				log.Error("resolving pattern: %v", err)
+				os.Exit(1)
+			}
+		}
+
+		// Dry-run: show what would be created and exit
+		if createDryRun {
+			fmt.Fprintf(os.Stderr, "dry-run: would create workspace %s\n", dirName)
+			if len(resolved) > 0 {
+				fmt.Fprintf(os.Stderr, "patterns to apply (in order):\n")
+				for _, rp := range resolved {
+					fmt.Fprintf(os.Stderr, "  %s (weight: %d, %s)\n", rp.Pattern.Name, rp.Pattern.Weight, rp.Source)
+				}
+			}
+			if len(createLabels) > 0 {
+				fmt.Fprintf(os.Stderr, "labels: %s\n", strings.Join(createLabels, ", "))
+			}
+			return
+		}
+
 		workspaceExists := false
 		if _, err := os.Stat(fullPath); err == nil {
 			workspaceExists = true
 		}
 
-		// If workspace exists, we're adding an app
 		addMode := workspaceExists
 
 		if !workspaceExists {
 			log.Verbose("creating new workspace: %s", dirName)
 
-			// Ensure root directory exists
 			if err := os.MkdirAll(config.C.RootDir, 0755); err != nil {
 				log.Error("creating root directory: %v", err)
 				os.Exit(1)
 			}
 
-			// Create the workspace directory
 			if err := os.MkdirAll(fullPath, 0755); err != nil {
 				log.Error("creating directory: %v", err)
 				os.Exit(1)
@@ -117,11 +145,11 @@ Examples:
 			log.Verbose("using existing workspace: %s", dirName)
 		}
 
-		// Apply pattern if specified
-		if createPattern != "" {
-			log.Verbose("applying pattern: %s", createPattern)
-			if err := applyPatternWithPrompt(workspaceName, appName, datePrefix, fullPath, addMode); err != nil {
-				log.Error("applying pattern: %v", err)
+		// Apply pattern chain if specified
+		if len(resolved) > 0 {
+			log.Verbose("applying %d pattern(s)", len(resolved))
+			if err := applyPatternChain(resolved, workspaceName, appName, datePrefix, fullPath, addMode); err != nil {
+				log.Error("applying patterns: %v", err)
 				os.Exit(1)
 			}
 		}
@@ -147,6 +175,16 @@ Examples:
 			}
 		}
 
+		// Write workspace metadata (.hack.yaml)
+		if !workspaceExists {
+			meta := buildWorkspaceMetadata(workspaceName, resolved)
+			if err := workspace.Save(fullPath, meta); err != nil {
+				log.Warn("failed to write .hack.yaml: %v", err)
+			} else {
+				log.FileCreated(".hack.yaml")
+			}
+		}
+
 		// Output the path (via HACK_CD_FD if available, otherwise stdout)
 		outputCdTarget(fullPath)
 
@@ -164,22 +202,18 @@ func init() {
 	createCmd.Flags().BoolVar(&createNoReadme, "no-readme", false, "skip README.md creation")
 	createCmd.Flags().BoolVar(&createNoEdit, "no-edit", false, "don't open editor after creation")
 	createCmd.Flags().BoolVarP(&createNoEdit, "N", "N", false, "don't open editor (short form)")
+	createCmd.Flags().BoolVar(&createDryRun, "dry-run", false, "show what would be created without writing files")
 	createCmd.Flags().StringVarP(&createPattern, "pattern", "p", "", "apply pattern to create app")
 	createCmd.Flags().StringVarP(&createModule, "module", "m", "", "Go module path (default: example.com/<app>)")
 	createCmd.Flags().StringVarP(&createAppName, "app-name", "a", "", "app directory name (default: <workspace-name>)")
+	createCmd.Flags().StringArrayVar(&createLabels, "label", nil, "set workspace label (key=value, repeatable)")
 
 	_ = createCmd.RegisterFlagCompletionFunc("pattern", completePatterns)
 }
 
-func applyPatternWithPrompt(workspaceName, appName, datePrefix, fullPath string, addMode bool) error {
-	// Load pattern metadata
-	patternPath := filepath.Join(config.C.PatternsDir, createPattern)
-	p, err := pattern.Load(patternPath)
-	if err != nil {
-		return fmt.Errorf("loading pattern: %w", err)
-	}
-
-	// Build default variables
+// applyPatternChain applies a resolved chain of patterns in order.
+// The last pattern in the chain is the one requested; earlier ones are inherited.
+func applyPatternChain(resolved []pattern.ResolvedPattern, workspaceName, appName, datePrefix, fullPath string, addMode bool) error {
 	module := createModule
 	if module == "" {
 		if config.C.DefaultOrg != "" {
@@ -198,35 +232,83 @@ func applyPatternWithPrompt(workspaceName, appName, datePrefix, fullPath string,
 		"module":   module,
 	}
 
-	// Apply pattern-defined defaults for variables not already set
-	for _, v := range p.Variables {
-		if _, ok := vars[v.Name]; !ok && v.Default != "" {
-			vars[v.Name] = v.Default
+	// Collect variable defaults from all patterns in the chain
+	for _, rp := range resolved {
+		for _, v := range rp.Pattern.Variables {
+			if _, ok := vars[v.Name]; !ok && v.Default != "" {
+				vars[v.Name] = v.Default
+			}
 		}
 	}
 
-	// Interactive mode: prompt for additional variables
-	if config.C.Interactive && len(p.Variables) > 0 {
-		vars, err = prompt.PatternVariables(p, vars)
-		if err != nil {
-			return fmt.Errorf("prompting for variables: %w", err)
+	// Interactive mode: prompt using the requested pattern's variables
+	if config.C.Interactive {
+		requested := resolved[len(resolved)-1].Pattern
+		if len(requested.Variables) > 0 {
+			var err error
+			vars, err = prompt.PatternVariables(requested, vars)
+			if err != nil {
+				return fmt.Errorf("prompting for variables: %w", err)
+			}
 		}
 	}
 
-	// Apply the pattern
-	opts := pattern.ApplyOptions{
-		SkipExisting: addMode, // In add mode, don't overwrite existing files
-	}
-	if err := pattern.ApplyWithOptions(config.C.PatternsDir, createPattern, fullPath, vars, opts); err != nil {
-		return err
+	// Apply each pattern in order
+	for i, rp := range resolved {
+		opts := pattern.ApplyOptions{
+			SkipExisting: addMode && i == 0,
+		}
+		log.Verbose("applying pattern %s (%s)", rp.Pattern.Name, rp.Source)
+		if err := pattern.ApplyWithOptions(config.C.PatternsDir, rp.Pattern.Name, fullPath, vars, opts); err != nil {
+			return fmt.Errorf("applying %s: %w", rp.Pattern.Name, err)
+		}
 	}
 
-	// Run post-create hooks
-	if err := pattern.RunPostCreate(p, fullPath, vars); err != nil {
-		return fmt.Errorf("post-create hooks: %w", err)
+	// Run post-create hooks from each pattern in order
+	for _, rp := range resolved {
+		if err := pattern.RunPostCreate(rp.Pattern, fullPath, vars); err != nil {
+			return fmt.Errorf("post-create hooks for %s: %w", rp.Pattern.Name, err)
+		}
 	}
 
 	return nil
+}
+
+// buildWorkspaceMetadata constructs the initial .hack.yaml for a new workspace.
+func buildWorkspaceMetadata(workspaceName string, resolved []pattern.ResolvedPattern) workspace.Metadata {
+	labels := make(map[string]string)
+
+	// Apply default labels from patterns (earlier patterns first, later override)
+	for _, rp := range resolved {
+		for k, v := range rp.Pattern.DefaultLabels {
+			labels[k] = v
+		}
+	}
+
+	// Record the pattern used
+	if len(resolved) > 0 {
+		requested := resolved[len(resolved)-1]
+		labels["hack.dev/pattern"] = requested.Pattern.Name
+	}
+
+	// Apply user-specified labels (highest priority)
+	for _, l := range createLabels {
+		key, value, _, err := workspace.ParseLabelArg(l)
+		if err != nil {
+			log.Warn("invalid label %q: %v", l, err)
+			continue
+		}
+		labels[key] = value
+	}
+
+	return workspace.Metadata{
+		APIVersion: "hack/v1",
+		Kind:       "Workspace",
+		MetadataObj: workspace.MetadataFields{
+			Name:   workspaceName,
+			Labels: labels,
+		},
+	}
 }
 
 func initGit(dir string) error {
