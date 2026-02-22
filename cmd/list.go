@@ -36,7 +36,8 @@ Examples:
   hack list           # List all workspaces
   hack list api       # List workspaces containing "api"
   hack ls             # Short alias`,
-	Args: cobra.MaximumNArgs(1),
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeWorkspaces,
 	Run: func(cmd *cobra.Command, args []string) {
 		filter := ""
 		if len(args) > 0 {

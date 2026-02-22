@@ -49,7 +49,8 @@ Examples:
   hack edit my-project -t       # Force terminal editor
   hack edit my-project --ide    # Force IDE
   hack open my-project          # Alias for edit`,
-	Args: cobra.ExactArgs(1),
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeWorkspaces,
 	Run: func(cmd *cobra.Command, args []string) {
 		filter := args[0]
 		dir, err := findMatchingDir(config.C.RootDir, filter)

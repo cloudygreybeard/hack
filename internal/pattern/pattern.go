@@ -21,6 +21,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -35,6 +36,7 @@ type Pattern struct {
 	Name        string     `yaml:"name"`
 	Description string     `yaml:"description"`
 	Variables   []Variable `yaml:"variables"`
+	PostCreate  []string   `yaml:"post_create"`
 }
 
 // Variable defines a template variable.
@@ -190,6 +192,54 @@ func ApplyWithOptions(patternsDir, patternName, destDir string, vars map[string]
 
 	log.Verbose("pattern applied: %d files created, %d skipped", filesCreated, filesSkipped)
 	return nil
+}
+
+// RunPostCreate executes post-create hooks defined in the pattern.
+// Each hook is run as a shell command in the destination directory.
+func RunPostCreate(p Pattern, destDir string, vars map[string]string) error {
+	if len(p.PostCreate) == 0 {
+		return nil
+	}
+
+	log.Verbose("running %d post-create hook(s)", len(p.PostCreate))
+	for i, hook := range p.PostCreate {
+		// Expand template variables in the hook command
+		expanded, err := expandHookTemplate(hook, vars)
+		if err != nil {
+			return fmt.Errorf("expanding hook %d: %w", i+1, err)
+		}
+
+		log.Debug("post-create hook %d: %s", i+1, expanded)
+
+		cmd := exec.Command("sh", "-c", expanded)
+		cmd.Dir = destDir
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("post-create hook %d failed: %w", i+1, err)
+		}
+		log.Verbose("post-create hook %d completed", i+1)
+	}
+	return nil
+}
+
+// expandHookTemplate processes Go template expressions in a hook command.
+func expandHookTemplate(hook string, vars map[string]string) (string, error) {
+	if !strings.Contains(hook, "{{") {
+		return hook, nil
+	}
+
+	tmpl, err := template.New("hook").Parse(hook)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, vars); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // Install copies a pattern from srcPath to the patterns directory.
