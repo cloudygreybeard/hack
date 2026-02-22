@@ -90,9 +90,10 @@ Examples:
 }
 
 var patternShowCmd = &cobra.Command{
-	Use:   "show <name>",
-	Short: "Show details about a pattern",
-	Args:  cobra.ExactArgs(1),
+	Use:               "show <name>",
+	Short:             "Show details about a pattern",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completePatterns,
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
 		patternPath := fmt.Sprintf("%s/%s", config.C.PatternsDir, name)
@@ -122,6 +123,64 @@ var patternShowCmd = &cobra.Command{
 				fmt.Printf("  %-12s %s%s%s\n", v.Name, v.Description, req, def)
 			}
 		}
+
+		if len(p.PostCreate) > 0 {
+			fmt.Println("\nPost-create hooks:")
+			for i, hook := range p.PostCreate {
+				fmt.Printf("  %d. %s\n", i+1, hook)
+			}
+		}
+	},
+}
+
+var patternSyncCmd = &cobra.Command{
+	Use:   "sync <directory>",
+	Short: "Bulk install patterns from a directory",
+	Long: `Install all patterns found in a directory.
+
+Each subdirectory containing a pattern.yaml is treated as a pattern
+and installed to ~/.hack/patterns/.
+
+This is useful for syncing patterns from a development workspace
+or a shared patterns repository.
+
+Examples:
+  hack pattern sync ./patterns
+  hack pattern sync ~/my-patterns`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		srcDir := args[0]
+
+		entries, err := os.ReadDir(srcDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error reading directory: %v\n", err)
+			os.Exit(1)
+		}
+
+		var installed, skipped int
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name()[0] == '.' {
+				continue
+			}
+			patternDir := fmt.Sprintf("%s/%s", srcDir, entry.Name())
+
+			// Check for pattern.yaml
+			if _, err := os.Stat(patternDir + "/pattern.yaml"); os.IsNotExist(err) {
+				skipped++
+				continue
+			}
+
+			if err := pattern.Install(patternDir, config.C.PatternsDir); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to install %s: %v\n", entry.Name(), err)
+				skipped++
+				continue
+			}
+
+			fmt.Printf("installed: %s\n", entry.Name())
+			installed++
+		}
+
+		fmt.Printf("\n%d pattern(s) installed, %d skipped\n", installed, skipped)
 	},
 }
 
@@ -130,4 +189,5 @@ func init() {
 	patternCmd.AddCommand(patternListCmd)
 	patternCmd.AddCommand(patternInstallCmd)
 	patternCmd.AddCommand(patternShowCmd)
+	patternCmd.AddCommand(patternSyncCmd)
 }

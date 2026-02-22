@@ -55,6 +55,7 @@ Configuration is read from ~/.hack.yaml, environment variables (HACK_*),
 and command-line flags.`,
 	Args:               cobra.MaximumNArgs(1),
 	DisableFlagParsing: false,
+	ValidArgsFunction:  completeWorkspaces,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Set log verbosity
 		if quiet {
@@ -172,7 +173,9 @@ func getMostRecentDir(rootDir string) (string, error) {
 	return dirs[0].path, nil
 }
 
-// findMatchingDir finds the first directory matching the filter (case-insensitive).
+// findMatchingDir finds the best-matching directory for the filter.
+// Results are ranked: exact suffix match > word-boundary match > substring match.
+// Within each tier, more recently modified directories rank higher.
 func findMatchingDir(rootDir, filter string) (string, error) {
 	entries, err := os.ReadDir(rootDir)
 	if err != nil {
@@ -180,14 +183,133 @@ func findMatchingDir(rootDir, filter string) (string, error) {
 	}
 
 	filterLower := strings.ToLower(filter)
+
+	type scored struct {
+		path    string
+		score   int
+		modTime int64
+	}
+
+	var matches []scored
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		if strings.Contains(strings.ToLower(entry.Name()), filterLower) {
-			return filepath.Join(rootDir, entry.Name()), nil
+		nameLower := strings.ToLower(entry.Name())
+		if !strings.Contains(nameLower, filterLower) {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		score := scoreMatch(nameLower, filterLower)
+		matches = append(matches, scored{
+			path:    filepath.Join(rootDir, entry.Name()),
+			score:   score,
+			modTime: info.ModTime().Unix(),
+		})
+	}
+
+	if len(matches) == 0 {
+		return "", nil
+	}
+
+	// Sort by score (descending), then by modification time (most recent first)
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score > matches[j].score
+		}
+		return matches[i].modTime > matches[j].modTime
+	})
+
+	return matches[0].path, nil
+}
+
+// scoreMatch returns a ranking score for how well name matches filter.
+// Higher scores indicate better matches.
+func scoreMatch(name, filter string) int {
+	// Exact match on the concept portion (after date prefix)
+	parts := strings.SplitN(name, ".", 2)
+	if len(parts) == 2 {
+		concept := parts[1]
+		if concept == filter {
+			return 100
+		}
+		if strings.HasSuffix(concept, filter) {
+			return 80
+		}
+		if strings.HasPrefix(concept, filter) {
+			return 70
 		}
 	}
 
-	return "", nil
+	// Exact full match
+	if name == filter {
+		return 90
+	}
+
+	// Word-boundary match (filter appears after a separator)
+	for _, sep := range []string{".", "-", "_"} {
+		if strings.Contains(name, sep+filter) {
+			return 60
+		}
+	}
+
+	// Suffix match
+	if strings.HasSuffix(name, filter) {
+		return 50
+	}
+
+	// Prefix match
+	if strings.HasPrefix(name, filter) {
+		return 40
+	}
+
+	// General substring match
+	return 10
+}
+
+// completeWorkspaces provides shell completion for workspace names.
+func completeWorkspaces(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = config.Init()
+	entries, err := os.ReadDir(config.C.RootDir)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var names []string
+	toCompleteLower := strings.ToLower(toComplete)
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if toComplete == "" || strings.Contains(strings.ToLower(entry.Name()), toCompleteLower) {
+			names = append(names, entry.Name())
+		}
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completePatterns provides shell completion for pattern names.
+func completePatterns(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = config.Init()
+	entries, err := os.ReadDir(config.C.PatternsDir)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var names []string
+	toCompleteLower := strings.ToLower(toComplete)
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if toComplete == "" || strings.Contains(strings.ToLower(entry.Name()), toCompleteLower) {
+			names = append(names, entry.Name())
+		}
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
 }

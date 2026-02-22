@@ -167,6 +167,8 @@ func init() {
 	createCmd.Flags().StringVarP(&createPattern, "pattern", "p", "", "apply pattern to create app")
 	createCmd.Flags().StringVarP(&createModule, "module", "m", "", "Go module path (default: example.com/<app>)")
 	createCmd.Flags().StringVarP(&createAppName, "app-name", "a", "", "app directory name (default: <workspace-name>)")
+
+	_ = createCmd.RegisterFlagCompletionFunc("pattern", completePatterns)
 }
 
 func applyPatternWithPrompt(workspaceName, appName, datePrefix, fullPath string, addMode bool) error {
@@ -215,7 +217,16 @@ func applyPatternWithPrompt(workspaceName, appName, datePrefix, fullPath string,
 	opts := pattern.ApplyOptions{
 		SkipExisting: addMode, // In add mode, don't overwrite existing files
 	}
-	return pattern.ApplyWithOptions(config.C.PatternsDir, createPattern, fullPath, vars, opts)
+	if err := pattern.ApplyWithOptions(config.C.PatternsDir, createPattern, fullPath, vars, opts); err != nil {
+		return err
+	}
+
+	// Run post-create hooks
+	if err := pattern.RunPostCreate(p, fullPath, vars); err != nil {
+		return fmt.Errorf("post-create hooks: %w", err)
+	}
+
+	return nil
 }
 
 func initGit(dir string) error {
