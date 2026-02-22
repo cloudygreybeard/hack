@@ -19,9 +19,12 @@ import (
 	"os"
 
 	"github.com/cloudygreybeard/hack/internal/config"
+	"github.com/cloudygreybeard/hack/internal/log"
 	"github.com/cloudygreybeard/hack/internal/pattern"
 	"github.com/spf13/cobra"
 )
+
+var listOutdated bool
 
 var patternCmd = &cobra.Command{
 	Use:   "pattern",
@@ -55,32 +58,71 @@ var patternListCmd = &cobra.Command{
 		}
 
 		for _, p := range patterns {
+			ver := ""
+			if p.Version != "" {
+				ver = " (" + p.Version + ")"
+			}
 			if p.Description != "" {
-				fmt.Printf("%-15s %s\n", p.Name, p.Description)
+				fmt.Printf("%-15s %s%s\n", p.Name, p.Description, ver)
 			} else {
-				fmt.Println(p.Name)
+				fmt.Printf("%s%s\n", p.Name, ver)
+			}
+		}
+
+		if listOutdated {
+			fmt.Println()
+			var outdated int
+			for _, p := range patterns {
+				info, err := pattern.CheckOutdated(config.C.PatternsDir, p.Name)
+				if err != nil {
+					log.Debug("checking %s: %v", p.Name, err)
+					continue
+				}
+				if info != nil {
+					fmt.Printf("outdated: %s (%s -> %s) from %s\n",
+						info.Name, info.InstalledVersion, info.AvailableVersion, info.Source)
+					outdated++
+				}
+			}
+			if outdated == 0 {
+				fmt.Fprintln(os.Stderr, "all patterns are up to date")
 			}
 		}
 	},
 }
 
 var patternInstallCmd = &cobra.Command{
-	Use:   "install <path>",
-	Short: "Install a pattern from a directory",
-	Long: `Install a pattern from a local directory to ~/.hack/patterns/.
+	Use:   "install <source>",
+	Short: "Install a pattern from a directory, URL, or Git repository",
+	Long: `Install a pattern to ~/.hack/patterns/.
 
-The source directory should contain:
-  - pattern.yaml     Pattern metadata
-  - template/        Files to copy when applying the pattern
+Sources can be:
+  - Local directory path
+  - Git clone URL (https://, git@, ssh://)
+  - GitHub shorthand (owner/repo or owner/repo//subpath)
+  - Tarball URL (.tar.gz, .tgz)
+
+If the remote source contains multiple patterns, all are installed.
 
 Examples:
   hack pattern install ./patterns/go-cli
-  hack pattern install ~/my-patterns/web-app`,
+  hack pattern install ~/my-patterns/web-app
+  hack pattern install https://github.com/org/patterns.git
+  hack pattern install org/patterns//go-cli
+  hack pattern install https://example.com/pattern.tar.gz`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		srcPath := args[0]
+		src := args[0]
 
-		if err := pattern.Install(srcPath, config.C.PatternsDir); err != nil {
+		if pattern.IsRemoteSource(src) {
+			if err := pattern.InstallFromRemote(src, config.C.PatternsDir); err != nil {
+				fmt.Fprintf(os.Stderr, "error installing from remote: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+
+		if err := pattern.InstallWithSource(src, config.C.PatternsDir, ""); err != nil {
 			fmt.Fprintf(os.Stderr, "error installing pattern: %v\n", err)
 			os.Exit(1)
 		}
@@ -107,6 +149,17 @@ var patternShowCmd = &cobra.Command{
 		fmt.Printf("Name:        %s\n", p.Name)
 		if p.Description != "" {
 			fmt.Printf("Description: %s\n", p.Description)
+		}
+		if p.Version != "" {
+			fmt.Printf("Version:     %s\n", p.Version)
+		}
+		if p.Source != "" {
+			fmt.Printf("Source:      %s\n", p.Source)
+		} else {
+			meta, _ := pattern.LoadInstalledMeta(config.C.PatternsDir, name)
+			if meta.Source != "" {
+				fmt.Printf("Source:      %s\n", meta.Source)
+			}
 		}
 		if p.Weight != 0 {
 			fmt.Printf("Weight:      %d\n", p.Weight)
@@ -216,10 +269,83 @@ Examples:
 	},
 }
 
+var patternUpdateCmd = &cobra.Command{
+	Use:   "update [name]",
+	Short: "Update installed patterns from their sources",
+	Long: `Re-install patterns from their recorded source paths.
+
+Without arguments, updates all patterns that have a recorded source.
+With a pattern name, updates only that pattern.
+
+Examples:
+  hack pattern update           # Update all patterns
+  hack pattern update go-cli    # Update a specific pattern`,
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completePatterns,
+	Run: func(cmd *cobra.Command, args []string) {
+		patterns, err := pattern.List(config.C.PatternsDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error listing patterns: %v\n", err)
+			os.Exit(1)
+		}
+
+		filter := ""
+		if len(args) > 0 {
+			filter = args[0]
+		}
+
+		var updated, skipped int
+		for _, p := range patterns {
+			if filter != "" && p.Name != filter {
+				continue
+			}
+
+			source := p.Source
+			if source == "" {
+				meta, _ := pattern.LoadInstalledMeta(config.C.PatternsDir, p.Name)
+				source = meta.Source
+			}
+
+			if source == "" {
+				log.Verbose("skipping %s: no source recorded", p.Name)
+				skipped++
+				continue
+			}
+
+			log.Info("updating %s from %s", p.Name, source)
+
+			if pattern.IsRemoteSource(source) {
+				if err := pattern.InstallFromRemote(source, config.C.PatternsDir); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to update %s: %v\n", p.Name, err)
+					skipped++
+					continue
+				}
+			} else {
+				if err := pattern.InstallWithSource(source, config.C.PatternsDir, source); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to update %s: %v\n", p.Name, err)
+					skipped++
+					continue
+				}
+			}
+			updated++
+		}
+
+		if filter != "" && updated == 0 && skipped == 0 {
+			fmt.Fprintf(os.Stderr, "pattern %q not found\n", filter)
+			os.Exit(1)
+		}
+
+		fmt.Fprintf(os.Stderr, "%d pattern(s) updated, %d skipped\n", updated, skipped)
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(patternCmd)
 	patternCmd.AddCommand(patternListCmd)
 	patternCmd.AddCommand(patternInstallCmd)
 	patternCmd.AddCommand(patternShowCmd)
 	patternCmd.AddCommand(patternSyncCmd)
+	patternCmd.AddCommand(patternUpdateCmd)
+
+	patternListCmd.Flags().BoolVar(&listOutdated, "outdated", false, "check for outdated patterns")
 }

@@ -23,6 +23,7 @@ import (
 )
 
 func main() {
+	cmd.RegisterPlugins()
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

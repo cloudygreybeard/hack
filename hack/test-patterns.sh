@@ -363,6 +363,12 @@ main() {
     test_new_patterns
     test_pattern_show
     
+    # Versioning and plugin tests
+    test_pattern_version
+    test_pattern_update
+    test_plugin_discovery
+    test_pattern_list_versions
+    
     echo ""
     echo "========================================"
     echo -e "Results: ${GREEN}$passed passed${NC}, ${RED}$failed failed${NC}"
@@ -370,6 +376,80 @@ main() {
     
     if [[ $failed -gt 0 ]]; then
         exit 1
+    fi
+}
+
+# Test: Pattern version field
+test_pattern_version() {
+    log_info "Testing: pattern version field"
+    
+    local output
+    output=$("$HACK_BIN" pattern show go-cli 2>&1)
+    
+    if echo "$output" | grep -q "Version:"; then
+        log_pass "pattern show displays version"
+    else
+        log_fail "pattern show - missing version"
+    fi
+}
+
+# Test: Pattern update from local source
+test_pattern_update() {
+    log_info "Testing: pattern update from source"
+    
+    local output
+    output=$("$HACK_BIN" pattern update go-cli 2>&1)
+    
+    # Should succeed (re-install from recorded source)
+    if echo "$output" | grep -q "updated\|skipped"; then
+        log_pass "pattern update completes"
+    else
+        log_fail "pattern update - unexpected output"
+    fi
+}
+
+# Test: Plugin discovery
+test_plugin_discovery() {
+    log_info "Testing: plugin discovery"
+    
+    # Create a test plugin
+    local plugin_dir="$TEST_DIR/.hack/plugins"
+    mkdir -p "$plugin_dir"
+    
+    cat > "$plugin_dir/hack-test-plugin" << 'PLUGIN'
+#!/bin/sh
+echo "plugin executed"
+PLUGIN
+    chmod +x "$plugin_dir/hack-test-plugin"
+    
+    # List plugins
+    local output
+    output=$("$HACK_BIN" --plugins-dir "$plugin_dir" plugin list 2>&1)
+    
+    if echo "$output" | grep -q "test-plugin"; then
+        log_pass "plugin discovery finds executables"
+    else
+        # Plugin list may just show the plugin, check via hack help
+        output=$("$HACK_BIN" --plugins-dir "$plugin_dir" --help 2>&1)
+        if echo "$output" | grep -q "test-plugin"; then
+            log_pass "plugin discovery registers commands"
+        else
+            log_fail "plugin discovery - plugin not found"
+        fi
+    fi
+}
+
+# Test: Pattern list shows versions
+test_pattern_list_versions() {
+    log_info "Testing: pattern list shows versions"
+    
+    local output
+    output=$("$HACK_BIN" pattern list 2>&1)
+    
+    if echo "$output" | grep -q "0\.\(1\|2\)\.0"; then
+        log_pass "pattern list shows version numbers"
+    else
+        log_fail "pattern list - no versions displayed"
     fi
 }
 
