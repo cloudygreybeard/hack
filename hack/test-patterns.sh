@@ -233,11 +233,11 @@ test_labels() {
         return
     fi
     
-    # Check hack.dev/pattern label was set
+    # Check hack.dev/pattern annotation was set
     if grep -q "hack.dev/pattern" "$ws_dir/.hack.yaml"; then
-        log_pass "workspace .hack.yaml created with pattern label"
+        log_pass "workspace .hack.yaml created with pattern annotation"
     else
-        log_fail "labels - missing hack.dev/pattern label"
+        log_fail "labels - missing hack.dev/pattern annotation"
     fi
 }
 
@@ -363,6 +363,18 @@ main() {
     test_new_patterns
     test_pattern_show
     
+    # Versioning and plugin tests
+    test_pattern_version
+    test_pattern_update
+    test_plugin_discovery
+    test_pattern_list_versions
+    
+    # Extract tests
+    test_extract_basic
+    test_extract_roundtrip
+    test_extract_no_templatise
+    test_annotation_not_label
+    
     echo ""
     echo "========================================"
     echo -e "Results: ${GREEN}$passed passed${NC}, ${RED}$failed failed${NC}"
@@ -370,6 +382,178 @@ main() {
     
     if [[ $failed -gt 0 ]]; then
         exit 1
+    fi
+}
+
+# Test: Pattern version field
+test_pattern_version() {
+    log_info "Testing: pattern version field"
+    
+    local output
+    output=$("$HACK_BIN" pattern show go-cli 2>&1)
+    
+    if echo "$output" | grep -q "Version:"; then
+        log_pass "pattern show displays version"
+    else
+        log_fail "pattern show - missing version"
+    fi
+}
+
+# Test: Pattern update from local source
+test_pattern_update() {
+    log_info "Testing: pattern update from source"
+    
+    local output
+    output=$("$HACK_BIN" pattern update go-cli 2>&1)
+    
+    # Should succeed (re-install from recorded source)
+    if echo "$output" | grep -q "updated\|skipped"; then
+        log_pass "pattern update completes"
+    else
+        log_fail "pattern update - unexpected output"
+    fi
+}
+
+# Test: Plugin discovery
+test_plugin_discovery() {
+    log_info "Testing: plugin discovery"
+    
+    # Create a test plugin
+    local plugin_dir="$TEST_DIR/.hack/plugins"
+    mkdir -p "$plugin_dir"
+    
+    cat > "$plugin_dir/hack-test-plugin" << 'PLUGIN'
+#!/bin/sh
+echo "plugin executed"
+PLUGIN
+    chmod +x "$plugin_dir/hack-test-plugin"
+    
+    # List plugins
+    local output
+    output=$("$HACK_BIN" --plugins-dir "$plugin_dir" plugin list 2>&1)
+    
+    if echo "$output" | grep -q "test-plugin"; then
+        log_pass "plugin discovery finds executables"
+    else
+        # Plugin list may just show the plugin, check via hack help
+        output=$("$HACK_BIN" --plugins-dir "$plugin_dir" --help 2>&1)
+        if echo "$output" | grep -q "test-plugin"; then
+            log_pass "plugin discovery registers commands"
+        else
+            log_fail "plugin discovery - plugin not found"
+        fi
+    fi
+}
+
+# Test: Pattern list shows versions
+test_pattern_list_versions() {
+    log_info "Testing: pattern list shows versions"
+    
+    local output
+    output=$("$HACK_BIN" pattern list 2>&1)
+    
+    if echo "$output" | grep -q "0\.\(1\|2\)\.0"; then
+        log_pass "pattern list shows version numbers"
+    else
+        log_fail "pattern list - no versions displayed"
+    fi
+}
+
+# Test: Basic pattern extract
+test_extract_basic() {
+    local name="test-extract"
+    log_info "Testing: pattern extract basic"
+    
+    # Create a workspace from go-cli pattern
+    "$HACK_BIN" create "$name" -p go-cli --no-git --no-edit -q >/dev/null 2>&1
+    
+    local ws_dir
+    ws_dir=$(find "$TEST_DIR" -maxdepth 1 -type d -name "*.$name" | head -1)
+    
+    local extract_dir="$TEST_DIR/extracted-$name"
+    
+    if "$HACK_BIN" pattern extract "$name" -o "$extract_dir" -q 2>&1; then
+        # Check pattern.yaml was generated
+        if [[ -f "$extract_dir/pattern.yaml" ]] && [[ -d "$extract_dir/template" ]]; then
+            log_pass "pattern extract produces pattern.yaml and template/"
+        else
+            log_fail "extract - missing pattern.yaml or template/"
+        fi
+    else
+        log_fail "extract - command failed"
+    fi
+}
+
+# Test: Round-trip (create -> extract -> create from extracted)
+test_extract_roundtrip() {
+    local name="test-roundtrip"
+    log_info "Testing: pattern extract round-trip"
+    
+    # Create a workspace from go-cli pattern
+    "$HACK_BIN" create "$name" -p go-cli --no-git --no-edit -q >/dev/null 2>&1
+    
+    local extract_dir="$TEST_DIR/roundtrip-pattern"
+    
+    # Extract it
+    "$HACK_BIN" pattern extract "$name" -o "$extract_dir" -n roundtrip-test -q 2>/dev/null
+    
+    # Install the extracted pattern to the test patterns dir
+    "$HACK_BIN" pattern install "$extract_dir" -q 2>/dev/null
+    
+    # Create a new workspace from the extracted pattern
+    local name2="test-roundtrip-2"
+    if "$HACK_BIN" create "$name2" -p roundtrip-test --no-git --no-edit -q 2>/dev/null; then
+        local ws2_dir
+        ws2_dir=$(find "$TEST_DIR" -maxdepth 1 -type d -name "*.$name2" | head -1)
+        
+        # Should have the app subdirectory
+        if [[ -d "$ws2_dir/$name2" ]]; then
+            log_pass "round-trip extract and re-create produces valid workspace"
+        else
+            log_fail "roundtrip - missing app directory in re-created workspace"
+        fi
+    else
+        log_fail "roundtrip - create from extracted pattern failed"
+    fi
+}
+
+# Test: Extract without templatisation
+test_extract_no_templatise() {
+    local name="test-no-tmpl"
+    log_info "Testing: pattern extract --no-templatise"
+    
+    "$HACK_BIN" create "$name" -p go-cli --no-git --no-edit -q >/dev/null 2>&1
+    
+    local extract_dir="$TEST_DIR/no-tmpl-pattern"
+    
+    "$HACK_BIN" pattern extract "$name" -o "$extract_dir" --templatise=false -q 2>&1
+    
+    # No .tmpl files should exist
+    local tmpl_count
+    tmpl_count=$(find "$extract_dir/template" -name "*.tmpl" 2>/dev/null | wc -l | tr -d ' ')
+    
+    if [[ "$tmpl_count" -eq 0 ]]; then
+        log_pass "no-templatise produces no .tmpl files"
+    else
+        log_fail "no-templatise - found $tmpl_count .tmpl files"
+    fi
+}
+
+# Test: hack.dev/pattern is an annotation, not a label
+test_annotation_not_label() {
+    local name="test-annot-check"
+    log_info "Testing: hack.dev/pattern stored as annotation"
+    
+    "$HACK_BIN" create "$name" -p go-cli --no-git --no-edit -q >/dev/null 2>&1
+    
+    local ws_dir
+    ws_dir=$(find "$TEST_DIR" -maxdepth 1 -type d -name "*.$name" | head -1)
+    
+    # Should be under annotations, not labels
+    if grep -A2 "annotations:" "$ws_dir/.hack.yaml" | grep -q "hack.dev/pattern"; then
+        log_pass "hack.dev/pattern is stored as annotation"
+    else
+        log_fail "hack.dev/pattern - not found under annotations"
     fi
 }
 

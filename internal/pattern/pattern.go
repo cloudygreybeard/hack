@@ -35,6 +35,8 @@ import (
 type Pattern struct {
 	Name          string            `yaml:"name"`
 	Description   string            `yaml:"description"`
+	Version       string            `yaml:"version,omitempty"`
+	Source        string            `yaml:"source,omitempty"`
 	Weight        int               `yaml:"weight"`
 	Labels        map[string]string `yaml:"labels,omitempty"`
 	DefaultLabels map[string]string `yaml:"default_labels,omitempty"`
@@ -260,12 +262,17 @@ func expandHookTemplate(hook string, vars map[string]string) (string, error) {
 
 // Install copies a pattern from srcPath to the patterns directory.
 func Install(srcPath, patternsDir string) error {
+	return InstallWithSource(srcPath, patternsDir, "")
+}
+
+// InstallWithSource copies a pattern and records its source origin.
+func InstallWithSource(srcPath, patternsDir, source string) error {
 	// Validate source
 	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
 		return fmt.Errorf("source path %q does not exist", srcPath)
 	}
 
-	// Load pattern to get name
+	// Load pattern to get name and version
 	p, err := Load(srcPath)
 	if err != nil {
 		return fmt.Errorf("invalid pattern: %w", err)
@@ -284,7 +291,27 @@ func Install(srcPath, patternsDir string) error {
 	}
 
 	// Copy the pattern
-	return copyDir(srcPath, destPath)
+	if err := copyDir(srcPath, destPath); err != nil {
+		return err
+	}
+
+	// Record source for future updates, resolving local paths to absolute
+	recordSource := source
+	if recordSource == "" {
+		absSrc, err := filepath.Abs(srcPath)
+		if err == nil {
+			recordSource = absSrc
+		}
+	}
+
+	if recordSource != "" || p.Version != "" {
+		_ = SaveInstalledMeta(patternsDir, p.Name, InstalledMeta{
+			Source:  recordSource,
+			Version: p.Version,
+		})
+	}
+
+	return nil
 }
 
 // processPathTemplate expands template expressions in file/directory paths.

@@ -27,6 +27,7 @@ import (
 type Config struct {
 	RootDir      string `mapstructure:"root_dir"`
 	PatternsDir  string `mapstructure:"patterns_dir"`
+	PluginsDir   string `mapstructure:"plugins_dir"`
 	Editor       string `mapstructure:"editor"`
 	IDE          string `mapstructure:"ide"`
 	EditMode     string `mapstructure:"edit_mode"`
@@ -49,6 +50,7 @@ func Init() error {
 	// Set defaults
 	viper.SetDefault("root_dir", filepath.Join(home, "hack"))
 	viper.SetDefault("patterns_dir", filepath.Join(home, ".hack", "patterns"))
+	viper.SetDefault("plugins_dir", filepath.Join(home, ".hack", "plugins"))
 	viper.SetDefault("editor", getDefaultEditor())
 	viper.SetDefault("ide", "")
 	viper.SetDefault("edit_mode", "auto")

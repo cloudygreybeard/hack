@@ -99,6 +99,7 @@ func init() {
 	// Persistent flags available to all commands
 	rootCmd.PersistentFlags().String("root-dir", "", "root directory for hack workspaces")
 	rootCmd.PersistentFlags().String("patterns-dir", "", "directory for patterns")
+	rootCmd.PersistentFlags().String("plugins-dir", "", "directory for plugins")
 	rootCmd.PersistentFlags().String("config", "", "config file (default ~/.hack.yaml)")
 	rootCmd.PersistentFlags().BoolP("interactive", "i", false, "enable interactive mode")
 	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "increase verbosity (-v, -vv, -vvv)")
@@ -107,6 +108,7 @@ func init() {
 	// Bind flags to viper
 	_ = viper.BindPFlag("root_dir", rootCmd.PersistentFlags().Lookup("root-dir"))
 	_ = viper.BindPFlag("patterns_dir", rootCmd.PersistentFlags().Lookup("patterns-dir"))
+	_ = viper.BindPFlag("plugins_dir", rootCmd.PersistentFlags().Lookup("plugins-dir"))
 	_ = viper.BindPFlag("interactive", rootCmd.PersistentFlags().Lookup("interactive"))
 }
 

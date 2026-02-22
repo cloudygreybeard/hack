@@ -277,6 +277,7 @@ func applyPatternChain(resolved []pattern.ResolvedPattern, workspaceName, appNam
 // buildWorkspaceMetadata constructs the initial .hack.yaml for a new workspace.
 func buildWorkspaceMetadata(workspaceName string, resolved []pattern.ResolvedPattern) workspace.Metadata {
 	labels := make(map[string]string)
+	annotations := make(map[string]string)
 
 	// Apply default labels from patterns (earlier patterns first, later override)
 	for _, rp := range resolved {
@@ -285,10 +286,10 @@ func buildWorkspaceMetadata(workspaceName string, resolved []pattern.ResolvedPat
 		}
 	}
 
-	// Record the pattern used
+	// Record the pattern used as an annotation (provenance, not for selection)
 	if len(resolved) > 0 {
 		requested := resolved[len(resolved)-1]
-		labels["hack.dev/pattern"] = requested.Pattern.Name
+		annotations["hack.dev/pattern"] = requested.Pattern.Name
 	}
 
 	// Apply user-specified labels (highest priority)
@@ -305,8 +306,9 @@ func buildWorkspaceMetadata(workspaceName string, resolved []pattern.ResolvedPat
 		APIVersion: "hack/v1",
 		Kind:       "Workspace",
 		MetadataObj: workspace.MetadataFields{
-			Name:   workspaceName,
-			Labels: labels,
+			Name:        workspaceName,
+			Labels:      labels,
+			Annotations: annotations,
 		},
 	}
 }
