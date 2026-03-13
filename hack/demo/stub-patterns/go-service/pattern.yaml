@@ -1,0 +1,28 @@
+name: go-service
+description: Go HTTP service with health endpoints
+version: 1.0.0
+weight: 20
+labels:
+  lang: go
+  type: service
+default_labels:
+  lang: go
+  type: service
+variables:
+  - name: name
+    description: Project name
+    required: true
+  - name: app_name
+    description: Service directory name
+    default: ""
+  - name: module
+    description: Go module path
+    default: ""
+  - name: year
+    description: Copyright year
+    default: "2026"
+  - name: date
+    description: Creation date
+  - name: port
+    description: HTTP listen port
+    default: "8080"

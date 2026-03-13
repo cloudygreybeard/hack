@@ -17,6 +17,9 @@ coverage.txt
 *.swo
 *~
 
+# Demo recordings (re-generate with hack/record-demo.sh)
+docs/*.cast
+
 # macOS
 .DS_Store
 
