@@ -1,0 +1,26 @@
+name: go-cli
+description: Go CLI application with Cobra
+version: 1.2.0
+weight: 20
+labels:
+  lang: go
+  type: cli
+default_labels:
+  lang: go
+variables:
+  - name: name
+    description: Project name
+    required: true
+  - name: app_name
+    description: App directory name
+    default: ""
+  - name: module
+    description: Go module path
+    default: ""
+  - name: year
+    description: Copyright year
+    default: "2026"
+  - name: date
+    description: Creation date
+post_create:
+  - "cd {{.app_name}} 2>/dev/null && go mod init {{.module}} 2>/dev/null || true"

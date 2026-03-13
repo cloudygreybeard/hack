@@ -1,0 +1,25 @@
+name: go-lib
+description: Go library with test stubs
+version: 1.0.0
+weight: 20
+labels:
+  lang: go
+  type: lib
+default_labels:
+  lang: go
+  type: lib
+variables:
+  - name: name
+    description: Project name
+    required: true
+  - name: app_name
+    description: Library directory name
+    default: ""
+  - name: module
+    description: Go module path
+    default: ""
+  - name: year
+    description: Copyright year
+    default: "2026"
+  - name: date
+    description: Creation date

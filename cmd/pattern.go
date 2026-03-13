@@ -57,13 +57,21 @@ var patternListCmd = &cobra.Command{
 			return
 		}
 
+		maxName := 0
+		for _, p := range patterns {
+			if len(p.Name) > maxName {
+				maxName = len(p.Name)
+			}
+		}
+
+		fmtStr := fmt.Sprintf("%%-%ds  %%s%%s\n", maxName)
 		for _, p := range patterns {
 			ver := ""
 			if p.Version != "" {
 				ver = " (" + p.Version + ")"
 			}
 			if p.Description != "" {
-				fmt.Printf("%-15s %s%s\n", p.Name, p.Description, ver)
+				fmt.Printf(fmtStr, p.Name, p.Description, ver)
 			} else {
 				fmt.Printf("%s%s\n", p.Name, ver)
 			}

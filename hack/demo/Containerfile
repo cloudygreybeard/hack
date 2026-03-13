@@ -1,0 +1,59 @@
+# Build stage: compile hack from source
+FROM golang:1.22-bookworm AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags "-s -w \
+    -X github.com/cloudygreybeard/hack/cmd.Version=0.7.0 \
+    -X github.com/cloudygreybeard/hack/cmd.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo demo) \
+    -X github.com/cloudygreybeard/hack/cmd.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o /hack .
+
+# Runtime stage: minimal image with hack, git, yq
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates bash \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install yq
+ADD https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 /usr/local/bin/yq
+RUN chmod +x /usr/local/bin/yq
+
+COPY --from=builder /hack /usr/local/bin/hack
+
+# Set up demo user
+RUN useradd -m -s /bin/bash demo
+USER demo
+WORKDIR /home/demo
+ENV HOME=/home/demo
+ENV TERM=xterm-256color
+
+# Configure hack
+RUN mkdir -p /home/demo/.hack/patterns /home/demo/hack
+COPY --chown=demo:demo hack/demo/stub-patterns/go-cli/ /home/demo/.hack/patterns/go-cli/
+COPY --chown=demo:demo hack/demo/stub-patterns/go-lib/ /home/demo/.hack/patterns/go-lib/
+COPY --chown=demo:demo hack/demo/stub-patterns/go-service/ /home/demo/.hack/patterns/go-service/
+COPY --chown=demo:demo hack/demo/stub-patterns/mcp-server/ /home/demo/.hack/patterns/mcp-server/
+COPY --chown=demo:demo examples/patterns/hello/ /home/demo/.hack/patterns/hello/
+
+# Write hack config
+RUN printf 'root_dir: /home/demo/hack\npatterns_dir: /home/demo/.hack/patterns\neditor: ""\ngit_init: true\ncreate_readme: true\ninteractive: false\n' \
+    > /home/demo/.hack.yaml
+
+# Seed demo workspaces
+COPY --chown=demo:demo hack/demo/seed-workspaces.sh /tmp/seed-workspaces.sh
+RUN bash /tmp/seed-workspaces.sh && rm /tmp/seed-workspaces.sh
+
+# Git config for init operations
+RUN git config --global user.email "demo@example.com" \
+    && git config --global user.name "Demo User" \
+    && git config --global init.defaultBranch main
+
+# Copy and run demo script
+COPY --chown=demo:demo hack/demo/demo-script.sh /home/demo/demo-script.sh
+RUN chmod +x /home/demo/demo-script.sh
+
+CMD ["/home/demo/demo-script.sh"]
