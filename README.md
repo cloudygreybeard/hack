@@ -2,6 +2,8 @@
 
 A CLI tool for managing development workspaces with pattern-based scaffolding, workspace metadata, and plugin support.
 
+![hack CLI Demo](docs/hack-demo.gif)
+
 ## Installation
 
 ### Homebrew (macOS/Linux)
