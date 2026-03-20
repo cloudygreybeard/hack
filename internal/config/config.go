@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -87,6 +88,19 @@ func Init() error {
 // ConfigFilePath returns the path to the config file, or empty if not using one.
 func ConfigFilePath() string {
 	return viper.ConfigFileUsed()
+}
+
+// Source returns how a config key got its current value:
+// "file", "env", "flag", or "default".
+func Source(key string) string {
+	envKey := "HACK_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	if _, ok := os.LookupEnv(envKey); ok {
+		return "env"
+	}
+	if viper.ConfigFileUsed() != "" && viper.InConfig(key) {
+		return "file"
+	}
+	return "default"
 }
 
 // Set sets a config value at runtime.

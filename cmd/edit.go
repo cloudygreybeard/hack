@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	"github.com/cloudygreybeard/hack/internal/config"
 	"github.com/cloudygreybeard/hack/internal/log"
@@ -112,7 +113,8 @@ func openWorkspace(dir, forceMode string) {
 }
 
 // openIDE launches an IDE on the workspace directory.
-// The IDE process is started in the background (non-blocking).
+// The process is fully detached with its own session, so it survives
+// after hack exits and does not interfere with the terminal state.
 func openIDE(dir string) {
 	ide := config.C.IDE
 	if ide == "" {
@@ -124,16 +126,15 @@ func openIDE(dir string) {
 	log.Debug("launching IDE: %s %s", ide, dir)
 	cmd := exec.Command(ide, ".")
 	cmd.Dir = dir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		log.Error("launching IDE: %v", err)
 		return
 	}
-	// Don't wait for the IDE process to complete
-	go func() {
-		_ = cmd.Wait()
-	}()
+	_ = cmd.Process.Release()
 }
 
 // openTerminalEditor opens a terminal editor on README.md in the given directory.
