@@ -41,22 +41,44 @@ var configShowCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		cfgFile := config.ConfigFilePath()
 		if cfgFile != "" {
-			fmt.Printf("Config file: %s\n\n", cfgFile)
+			fmt.Printf("# config file: %s\n", cfgFile)
 		} else {
-			fmt.Println("Config file: (not found, using defaults)")
-			fmt.Println()
+			fmt.Printf("# config file: not found, using defaults\n")
+		}
+		fmt.Println()
+
+		type entry struct {
+			key   string
+			value string
 		}
 
-		fmt.Printf("root_dir:      %s\n", config.C.RootDir)
-		fmt.Printf("patterns_dir:  %s\n", config.C.PatternsDir)
-		fmt.Printf("editor:        %s\n", config.C.Editor)
-		fmt.Printf("git_init:      %t\n", config.C.GitInit)
-		fmt.Printf("create_readme: %t\n", config.C.CreateReadme)
-		fmt.Printf("interactive:   %t\n", config.C.Interactive)
-		if config.C.DefaultOrg != "" {
-			fmt.Printf("default_org:   %s\n", config.C.DefaultOrg)
-		} else {
-			fmt.Printf("default_org:   (not set, using example.com)\n")
+		entries := []entry{
+			{"root_dir", config.C.RootDir},
+			{"patterns_dir", config.C.PatternsDir},
+			{"plugins_dir", config.C.PluginsDir},
+			{"editor", config.C.Editor},
+			{"ide", config.C.IDE},
+			{"edit_mode", config.C.EditMode},
+			{"git_init", fmt.Sprintf("%t", config.C.GitInit)},
+			{"create_readme", fmt.Sprintf("%t", config.C.CreateReadme)},
+			{"interactive", fmt.Sprintf("%t", config.C.Interactive)},
+			{"default_org", config.C.DefaultOrg},
+		}
+
+		maxKey := 0
+		for _, e := range entries {
+			if len(e.key) > maxKey {
+				maxKey = len(e.key)
+			}
+		}
+
+		for _, e := range entries {
+			src := config.Source(e.key)
+			val := e.value
+			if val == "" {
+				val = "(not set)"
+			}
+			fmt.Printf("%-*s  %-30s  # %s\n", maxKey+1, e.key+":", val, src)
 		}
 	},
 }
@@ -95,8 +117,18 @@ root_dir: ~/hack
 # Directory for patterns (templates)
 patterns_dir: ~/.hack/patterns
 
-# Editor to open README.md after creating workspace
+# Directory for plugins
+plugins_dir: ~/.hack/plugins
+
+# Terminal editor for hack edit --terminal and hack create
 # editor: vim
+
+# IDE command for hack edit --ide (e.g. cursor, code)
+# ide: ""
+
+# Edit mode: auto, terminal, or ide
+# auto: use IDE if configured, otherwise terminal editor
+edit_mode: auto
 
 # Initialize git repository on create
 git_init: true
