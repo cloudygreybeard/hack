@@ -139,6 +139,20 @@ func ParseLabelArg(arg string) (key, value string, remove bool, err error) {
 	return kv[0], kv[1], false, nil
 }
 
+// Rename updates the metadata name in .hack.yaml. The directory must
+// already have been renamed; dir is the new directory path.
+func Rename(dir, newName string) error {
+	m, err := Load(dir)
+	if err != nil {
+		return err
+	}
+	if m.APIVersion == "" {
+		return nil
+	}
+	m.MetadataObj.Name = newName
+	return Save(dir, m)
+}
+
 // FormatLabels returns labels as a comma-separated "key=value" string.
 func FormatLabels(labels map[string]string) string {
 	if len(labels) == 0 {
