@@ -20,14 +20,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/cloudygreybeard/hack/internal/log"
 )
@@ -50,31 +47,13 @@ func storageBasePath() (string, error) {
 }
 
 // workspaceHash computes the Cursor workspace storage hash for a directory.
-// On macOS: MD5(fsPath + round(birthtimeMs))
-// On Linux: MD5(fsPath + inode)
+// The salt is platform-specific (birthtime on macOS, inode on Linux) and
+// provided by platformSalt in the _darwin.go / _linux.go files.
 func workspaceHash(fsPath string) (string, error) {
-	info, err := os.Stat(fsPath)
+	salt, err := platformSalt(fsPath)
 	if err != nil {
-		return "", fmt.Errorf("stat %s: %w", fsPath, err)
+		return "", err
 	}
-
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return "", fmt.Errorf("cannot get syscall.Stat_t for %s", fsPath)
-	}
-
-	var salt string
-	switch runtime.GOOS {
-	case "darwin":
-		btimeFloat := float64(stat.Birthtimespec.Sec)*1000.0 + float64(stat.Birthtimespec.Nsec)/1e6
-		btimeMs := int64(math.Round(btimeFloat))
-		salt = strconv.FormatInt(btimeMs, 10)
-	case "linux":
-		salt = strconv.FormatUint(stat.Ino, 10)
-	default:
-		return "", fmt.Errorf("unsupported platform %q", runtime.GOOS)
-	}
-
 	raw := fsPath + salt
 	hash := md5.Sum([]byte(raw))
 	return hex.EncodeToString(hash[:]), nil
