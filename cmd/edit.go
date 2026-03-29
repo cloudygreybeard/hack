@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 
 	"github.com/cloudygreybeard/hack/internal/config"
 	"github.com/cloudygreybeard/hack/internal/log"
@@ -129,7 +128,7 @@ func openIDE(dir string) {
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = detachedProcAttr()
 	if err := cmd.Start(); err != nil {
 		log.Error("launching IDE: %v", err)
 		return
