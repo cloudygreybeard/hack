@@ -69,11 +69,21 @@ hack create my-project -p go-cli --dry-run # preview without writing files
 
 ```bash
 hack edit my-project        # open in editor/IDE (configurable)
+hack rename old-name new-name      # rename workspace (preserves date prefix)
+hack rename proj 2026-03-20.new    # rename with new date prefix
 hack rm my-project          # remove workspace (with confirmation)
 hack archive my-project     # move to .archive/
 hack archive --list         # list archived workspaces
 hack archive --restore foo  # restore from archive
 ```
+
+#### Workspace Renaming
+
+`hack rename` renames the workspace directory, updates `.hack.yaml` metadata, and migrates Cursor IDE workspace storage so that chat history and settings follow the rename.
+
+Cursor must be closed before renaming. If Cursor is running, `hack rename` refuses to proceed (override with `--force`, though this is not recommended). Renaming a workspace while an agent session is active in that workspace will terminate the session: the agent's working directory, file watchers, and shell sessions all become invalid, and the conversation context references paths that no longer exist. Close all Cursor windows for the workspace before renaming.
+
+Use `--no-cursor` to skip the Cursor storage migration entirely (useful on systems without Cursor or when chat history is not important).
 
 ### Workspace Metadata
 
