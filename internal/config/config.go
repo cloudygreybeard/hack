@@ -36,10 +36,36 @@ type Config struct {
 	CreateReadme bool   `mapstructure:"create_readme"`
 	Interactive  bool   `mapstructure:"interactive"`
 	DefaultOrg   string `mapstructure:"default_org"`
+	ShellAlias   string `mapstructure:"shell_alias"`
+
+	// Persona is the resolved persona name (empty for base "hack").
+	// Not loaded from config; derived from $HACK_NAME or os.Args[0].
+	Persona string `mapstructure:"-"`
 }
 
 // C is the global configuration instance.
 var C Config
+
+// BinaryName returns the effective binary name for this persona.
+func (c *Config) BinaryName() string {
+	if c.Persona != "" {
+		return "hack-" + c.Persona
+	}
+	return "hack"
+}
+
+// PersonaName resolves the persona from $HACK_NAME or os.Args[0].
+// Returns empty string for the base "hack" persona.
+func PersonaName() string {
+	if name := os.Getenv("HACK_NAME"); name != "" {
+		return name
+	}
+	base := filepath.Base(os.Args[0])
+	if after, ok := strings.CutPrefix(base, "hack-"); ok && after != "" {
+		return after
+	}
+	return ""
+}
 
 // Init initializes the configuration from file, environment, and defaults.
 func Init() error {
@@ -48,10 +74,24 @@ func Init() error {
 		home = os.Getenv("HOME")
 	}
 
+	persona := PersonaName()
+
+	// Derive identity from persona
+	configName := ".hack"          // e.g. ".hack" or ".hack-diversions"
+	rootBase := "hack"             // e.g. "hack" or "hack-diversions"
+	dotBase := ".hack"             // e.g. ".hack" or ".hack-diversions"
+	envPrefix := "HACK"            // e.g. "HACK" or "HACK_DIVERSIONS"
+	if persona != "" {
+		configName = ".hack-" + persona
+		rootBase = "hack-" + persona
+		dotBase = ".hack-" + persona
+		envPrefix = "HACK_" + strings.ToUpper(strings.ReplaceAll(persona, "-", "_"))
+	}
+
 	// Set defaults
-	viper.SetDefault("root_dir", filepath.Join(home, "hack"))
-	viper.SetDefault("patterns_dir", filepath.Join(home, ".hack", "patterns"))
-	viper.SetDefault("plugins_dir", filepath.Join(home, ".hack", "plugins"))
+	viper.SetDefault("root_dir", filepath.Join(home, rootBase))
+	viper.SetDefault("patterns_dir", filepath.Join(home, dotBase, "patterns"))
+	viper.SetDefault("plugins_dir", filepath.Join(home, dotBase, "plugins"))
 	viper.SetDefault("editor", getDefaultEditor())
 	viper.SetDefault("ide", "")
 	viper.SetDefault("edit_mode", "auto")
@@ -59,15 +99,16 @@ func Init() error {
 	viper.SetDefault("create_readme", true)
 	viper.SetDefault("interactive", false)
 	viper.SetDefault("default_org", "")
+	viper.SetDefault("shell_alias", "")
 
 	// Config file settings
-	viper.SetConfigName(".hack")
+	viper.SetConfigName(configName)
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(home)
 	viper.AddConfigPath(".")
 
 	// Environment variables
-	viper.SetEnvPrefix("HACK")
+	viper.SetEnvPrefix(envPrefix)
 	viper.AutomaticEnv()
 
 	// Read config file (ignore if not found)
@@ -82,7 +123,26 @@ func Init() error {
 		return fmt.Errorf("unmarshaling config: %w", err)
 	}
 
+	C.Persona = persona
+	C.RootDir = expandHome(C.RootDir, home)
+	C.PatternsDir = expandHome(C.PatternsDir, home)
+	C.PluginsDir = expandHome(C.PluginsDir, home)
 	return nil
+}
+
+func expandHome(path, home string) string {
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
+// EnvPrefix returns the environment variable prefix for the current persona.
+func EnvPrefix() string {
+	if C.Persona != "" {
+		return "HACK_" + strings.ToUpper(strings.ReplaceAll(C.Persona, "-", "_"))
+	}
+	return "HACK"
 }
 
 // ConfigFilePath returns the path to the config file, or empty if not using one.
@@ -93,7 +153,7 @@ func ConfigFilePath() string {
 // Source returns how a config key got its current value:
 // "file", "env", "flag", or "default".
 func Source(key string) string {
-	envKey := "HACK_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	envKey := EnvPrefix() + "_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 	if _, ok := os.LookupEnv(envKey); ok {
 		return "env"
 	}

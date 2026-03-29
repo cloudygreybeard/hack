@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudygreybeard/hack/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +30,8 @@ var (
 	bootstrapShell   string
 	bootstrapInstall bool
 	bootstrapRcFile  string
+	bootstrapPersona string
+	bootstrapAlias   string
 )
 
 var bootstrapCmd = &cobra.Command{
@@ -42,25 +45,43 @@ when the command outputs a valid path.
 By default, prints the snippet to stdout. Use --install to append it
 to your shell's rc file.
 
+Use --persona to generate a snippet for a named persona (e.g. diversions).
+The generated function calls the base hack binary with HACK_NAME set.
+
 Examples:
-  hack bootstrap                    # Print snippet (auto-detect shell)
-  hack bootstrap --shell bash       # Print bash snippet
-  hack bootstrap --install          # Install to detected rc file
-  hack bootstrap --install --rc ~/.bashrc  # Install to specific file`,
+  hack bootstrap                                 # Print snippet (base hack)
+  hack bootstrap --persona diversions --alias hd  # Print diversions snippet
+  hack bootstrap --install                        # Install to detected rc file
+  hack bootstrap --install --rc ~/.bashrc         # Install to specific file`,
 	Run: func(cmd *cobra.Command, args []string) {
 		shell := bootstrapShell
 		if shell == "" {
 			shell = detectShell()
 		}
 
-		snippet := getSnippet(shell)
+		persona := bootstrapPersona
+		if persona == "" {
+			persona = config.C.Persona
+		}
+
+		alias := bootstrapAlias
+		if alias == "" && persona != "" {
+			alias = config.C.ShellAlias
+		}
+
+		snippet := buildSnippet(shell, persona, alias)
 
 		if bootstrapInstall {
 			rcFile := bootstrapRcFile
 			if rcFile == "" {
 				rcFile = getRcFile(shell)
 			}
-			if err := installSnippet(rcFile, snippet, shell); err != nil {
+			funcName := "hack"
+			if persona != "" {
+				funcName = "hack-" + persona
+			}
+			evalLine := buildEvalLine(shell, persona, alias)
+			if err := installSnippet(rcFile, evalLine, funcName); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
@@ -76,6 +97,8 @@ func init() {
 	bootstrapCmd.Flags().StringVar(&bootstrapShell, "shell", "", "shell type (bash, zsh, fish)")
 	bootstrapCmd.Flags().BoolVar(&bootstrapInstall, "install", false, "install snippet to rc file")
 	bootstrapCmd.Flags().StringVar(&bootstrapRcFile, "rc", "", "rc file path (default: auto-detect)")
+	bootstrapCmd.Flags().StringVar(&bootstrapPersona, "persona", "", "generate snippet for a named persona")
+	bootstrapCmd.Flags().StringVar(&bootstrapAlias, "alias", "", "short alias for the shell function")
 }
 
 func detectShell() string {
@@ -86,15 +109,112 @@ func detectShell() string {
 	return filepath.Base(strings.TrimSuffix(shellPath, filepath.Ext(shellPath)))
 }
 
-func getSnippet(shell string) string {
+// buildSnippet generates the shell integration snippet for the given shell,
+// persona, and optional alias.
+func buildSnippet(shell, persona, alias string) string {
 	switch shell {
 	case "fish":
-		return fishSnippet
+		return buildFishSnippet(persona, alias)
 	case "zsh", "bash", "sh":
-		return bashSnippet
+		return buildBashSnippet(persona, alias)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown shell %q, using bash-compatible syntax\n", shell)
-		return bashSnippet
+		return buildBashSnippet(persona, alias)
+	}
+}
+
+func buildBashSnippet(persona, alias string) string {
+	funcName := "hack"
+	hackCmd := "command hack"
+	envPreamble := "HACK_CD_FD=63"
+	marker := "# hack shell integration"
+
+	if persona != "" {
+		funcName = "hack-" + persona
+		hackCmd = "command hack"
+		envPreamble = fmt.Sprintf("HACK_CD_FD=63 HACK_NAME=%s", persona)
+		marker = fmt.Sprintf("# hack-%s shell integration", persona)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", marker)
+	fmt.Fprintf(&b, "%s() {\n", funcName)
+	fmt.Fprintf(&b, "    local cd_target\n")
+	fmt.Fprintf(&b, "    exec 4>&1\n")
+	fmt.Fprintf(&b, "    cd_target=$(%s %s \"$@\" 63>&1 1>&4)\n", envPreamble, hackCmd)
+	fmt.Fprintf(&b, "    local exit_code=$?\n")
+	fmt.Fprintf(&b, "    exec 4>&-\n")
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "    if [[ $exit_code -eq 0 && -n \"$cd_target\" && -d \"$cd_target\" ]]; then\n")
+	fmt.Fprintf(&b, "        cd \"$cd_target\"\n")
+	fmt.Fprintf(&b, "    fi\n")
+	fmt.Fprintf(&b, "    return $exit_code\n")
+	fmt.Fprintf(&b, "}")
+
+	if alias != "" {
+		fmt.Fprintf(&b, "\nalias %s='%s'", alias, funcName)
+	}
+
+	return b.String()
+}
+
+func buildFishSnippet(persona, alias string) string {
+	funcName := "hack"
+	hackCmd := "command hack"
+	envPreamble := "HACK_CD_FD=63"
+	marker := "# hack shell integration"
+
+	if persona != "" {
+		funcName = "hack-" + persona
+		hackCmd = "command hack"
+		envPreamble = fmt.Sprintf("HACK_CD_FD=63 HACK_NAME=%s", persona)
+		marker = fmt.Sprintf("# hack-%s shell integration", persona)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", marker)
+	fmt.Fprintf(&b, "function %s\n", funcName)
+	fmt.Fprintf(&b, "    set -l cd_target (begin; env %s %s $argv 63>&1 1>&2; end 2>&1)\n", envPreamble, hackCmd)
+	fmt.Fprintf(&b, "    set -l exit_code $status\n")
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "    if test $exit_code -eq 0 -a -n \"$cd_target\" -a -d \"$cd_target\"\n")
+	fmt.Fprintf(&b, "        cd \"$cd_target\"\n")
+	fmt.Fprintf(&b, "    end\n")
+	fmt.Fprintf(&b, "    return $exit_code\n")
+	fmt.Fprintf(&b, "end")
+
+	if alias != "" {
+		fmt.Fprintf(&b, "\nalias %s='%s'", alias, funcName)
+	}
+
+	return b.String()
+}
+
+// buildEvalLine generates the guarded eval one-liner for --install.
+func buildEvalLine(shell, persona, alias string) string {
+	var bootstrapArgs []string
+	if persona != "" {
+		bootstrapArgs = append(bootstrapArgs, "--persona "+persona)
+	}
+	if alias != "" {
+		bootstrapArgs = append(bootstrapArgs, "--alias "+alias)
+	}
+
+	args := ""
+	if len(bootstrapArgs) > 0 {
+		args = " " + strings.Join(bootstrapArgs, " ")
+	}
+
+	funcName := "hack"
+	if persona != "" {
+		funcName = "hack-" + persona
+	}
+
+	switch shell {
+	case "fish":
+		return fmt.Sprintf("# %s shell integration\ncommand -q hack; and eval (hack bootstrap%s)", funcName, args)
+	default:
+		return fmt.Sprintf("# %s shell integration\ncommand -v hack >/dev/null && eval \"$(hack bootstrap%s)\"", funcName, args)
 	}
 }
 
@@ -110,7 +230,6 @@ func getRcFile(shell string) string {
 	case "zsh":
 		return filepath.Join(home, ".zshrc")
 	case "bash":
-		// Prefer .bashrc, fall back to .bash_profile for login shells
 		bashrc := filepath.Join(home, ".bashrc")
 		if _, err := os.Stat(bashrc); err == nil {
 			return bashrc
@@ -121,25 +240,23 @@ func getRcFile(shell string) string {
 	}
 }
 
-func installSnippet(rcFile, snippet, shell string) error {
-	// Expand ~ if present
+func installSnippet(rcFile, snippet, funcName string) error {
 	if strings.HasPrefix(rcFile, "~/") {
 		home, _ := os.UserHomeDir()
 		rcFile = filepath.Join(home, rcFile[2:])
 	}
 
-	// Check if already installed
-	if isSnippetInstalled(rcFile) {
-		fmt.Printf("hack shell integration already present in %s\n", rcFile)
+	marker := fmt.Sprintf("# %s shell integration", funcName)
+	funcDef := funcName + "()"
+	if isSnippetInstalled(rcFile, marker, funcDef) {
+		fmt.Printf("%s shell integration already present in %s\n", funcName, rcFile)
 		return nil
 	}
 
-	// Ensure parent directory exists (for fish)
 	if err := os.MkdirAll(filepath.Dir(rcFile), 0755); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
 	}
 
-	// Back up existing file
 	if _, err := os.Stat(rcFile); err == nil {
 		backupFile := rcFile + ".backup." + time.Now().Format("20060102-150405")
 		data, err := os.ReadFile(rcFile)
@@ -152,14 +269,12 @@ func installSnippet(rcFile, snippet, shell string) error {
 		fmt.Printf("backed up %s to %s\n", rcFile, backupFile)
 	}
 
-	// Open file for appending
 	f, err := os.OpenFile(rcFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("opening rc file: %w", err)
 	}
 	defer f.Close()
 
-	// Add newlines before snippet if file is not empty
 	info, _ := f.Stat()
 	if info.Size() > 0 {
 		if _, err := f.WriteString("\n\n"); err != nil {
@@ -167,17 +282,16 @@ func installSnippet(rcFile, snippet, shell string) error {
 		}
 	}
 
-	// Write snippet
 	if _, err := f.WriteString(snippet + "\n"); err != nil {
 		return fmt.Errorf("writing snippet: %w", err)
 	}
 
-	fmt.Printf("installed hack shell integration to %s\n", rcFile)
+	fmt.Printf("installed %s shell integration to %s\n", funcName, rcFile)
 	fmt.Printf("restart your shell or run: source %s\n", rcFile)
 	return nil
 }
 
-func isSnippetInstalled(rcFile string) bool {
+func isSnippetInstalled(rcFile, marker, funcDef string) bool {
 	f, err := os.Open(rcFile)
 	if err != nil {
 		return false
@@ -187,42 +301,9 @@ func isSnippetInstalled(rcFile string) bool {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
-		// Check for the distinctive marker
-		if strings.Contains(line, "# hack shell integration") {
-			return true
-		}
-		// Also check for the function definition
-		if strings.Contains(line, "hack()") || strings.Contains(line, "function hack") {
+		if strings.Contains(line, marker) || strings.Contains(line, funcDef) {
 			return true
 		}
 	}
 	return false
 }
-
-const bashSnippet = `# hack shell integration
-hack() {
-    local cd_target
-    # Save original stdout to fd 4
-    exec 4>&1
-    # fd 63 -> capture pipe, stdout -> fd 4 (terminal)
-    cd_target=$(HACK_CD_FD=63 command hack "$@" 63>&1 1>&4)
-    local exit_code=$?
-    exec 4>&-
-
-    if [[ $exit_code -eq 0 && -n "$cd_target" && -d "$cd_target" ]]; then
-        cd "$cd_target"
-    fi
-    return $exit_code
-}`
-
-const fishSnippet = `# hack shell integration
-function hack
-    # fd 63 -> capture, stdout -> terminal (fd 1 preserved via begin block)
-    set -l cd_target (begin; env HACK_CD_FD=63 command hack $argv 63>&1 1>&2; end 2>&1)
-    set -l exit_code $status
-
-    if test $exit_code -eq 0 -a -n "$cd_target" -a -d "$cd_target"
-        cd "$cd_target"
-    end
-    return $exit_code
-end`

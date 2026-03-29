@@ -26,12 +26,12 @@ import (
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage configuration",
-	Long: `View and manage hack configuration.
+	Long: `View and manage configuration.
 
 Configuration is loaded from (in order of precedence):
   1. Command-line flags
-  2. Environment variables (HACK_*)
-  3. Config file (~/.hack.yaml)
+  2. Environment variables
+  3. Config file
   4. Built-in defaults`,
 }
 
@@ -39,12 +39,16 @@ var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show current configuration",
 	Run: func(cmd *cobra.Command, args []string) {
+		if config.C.Persona != "" {
+			fmt.Printf("# persona:     %s\n", config.C.Persona)
+		}
 		cfgFile := config.ConfigFilePath()
 		if cfgFile != "" {
 			fmt.Printf("# config file: %s\n", cfgFile)
 		} else {
 			fmt.Printf("# config file: not found, using defaults\n")
 		}
+		fmt.Printf("# env prefix:  %s_*\n", config.EnvPrefix())
 		fmt.Println()
 
 		type entry struct {
@@ -63,6 +67,7 @@ var configShowCmd = &cobra.Command{
 			{"create_readme", fmt.Sprintf("%t", config.C.CreateReadme)},
 			{"interactive", fmt.Sprintf("%t", config.C.Interactive)},
 			{"default_org", config.C.DefaultOrg},
+			{"shell_alias", config.C.ShellAlias},
 		}
 
 		maxKey := 0
@@ -86,7 +91,7 @@ var configShowCmd = &cobra.Command{
 var configInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a default config file",
-	Long: `Create a default configuration file at ~/.hack.yaml.
+	Long: `Create a default configuration file.
 
 If the file already exists, this command will not overwrite it
 unless --force is specified.`,
@@ -99,31 +104,38 @@ unless --force is specified.`,
 			os.Exit(1)
 		}
 
-		cfgPath := filepath.Join(home, ".hack.yaml")
+		name := config.C.BinaryName()
+		cfgPath := filepath.Join(home, "."+name+".yaml")
 
-		// Check if file exists
 		if _, err := os.Stat(cfgPath); err == nil && !force {
 			fmt.Fprintf(os.Stderr, "config file already exists: %s\n", cfgPath)
 			fmt.Fprintln(os.Stderr, "use --force to overwrite")
 			os.Exit(1)
 		}
 
-		content := `# hack configuration
-# See: hack config show
+		dotBase := filepath.Join(home, ".hack")
+		rootDir := filepath.Join(home, "hack")
+		if config.C.Persona != "" {
+			dotBase = filepath.Join(home, ".hack-"+config.C.Persona)
+			rootDir = filepath.Join(home, "hack-"+config.C.Persona)
+		}
 
-# Root directory for hack workspaces
-root_dir: ~/hack
+		content := fmt.Sprintf(`# %s configuration
+# See: %s config show
+
+# Root directory for workspaces
+root_dir: %s
 
 # Directory for patterns (templates)
-patterns_dir: ~/.hack/patterns
+patterns_dir: %s/patterns
 
 # Directory for plugins
-plugins_dir: ~/.hack/plugins
+plugins_dir: %s/plugins
 
-# Terminal editor for hack edit --terminal and hack create
+# Terminal editor for %s edit --terminal and %s create
 # editor: vim
 
-# IDE command for hack edit --ide (e.g. cursor, code)
+# IDE command for %s edit --ide (e.g. cursor, code)
 # ide: ""
 
 # Edit mode: auto, terminal, or ide
@@ -142,7 +154,10 @@ interactive: false
 # Default GitHub organization for module paths
 # If not set, uses example.com/<name> as the default module path
 # default_org: your-org
-`
+
+# Short alias for shell integration (used by %s bootstrap)
+# shell_alias: %s
+`, name, name, rootDir, dotBase, dotBase, name, name, name, name, shortAliasSuggestion(config.C.Persona))
 
 		if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "error writing config file: %v\n", err)
@@ -151,6 +166,13 @@ interactive: false
 
 		fmt.Printf("Config file created: %s\n", cfgPath)
 	},
+}
+
+func shortAliasSuggestion(persona string) string {
+	if persona == "" {
+		return "h"
+	}
+	return "h" + persona[:1]
 }
 
 var configPathCmd = &cobra.Command{
@@ -162,7 +184,7 @@ var configPathCmd = &cobra.Command{
 			fmt.Println(cfgFile)
 		} else {
 			home, _ := os.UserHomeDir()
-			fmt.Println(filepath.Join(home, ".hack.yaml"))
+			fmt.Println(filepath.Join(home, "."+config.C.BinaryName()+".yaml"))
 		}
 	},
 }
