@@ -57,13 +57,16 @@ and command-line flags.`,
 	DisableFlagParsing: false,
 	ValidArgsFunction:  completeWorkspaces,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Set log verbosity
 		if quiet {
 			log.SetLevel(log.LevelQuiet)
 		} else {
 			log.SetVerbosity(verbosity)
 		}
-		return config.Init()
+		if err := config.Init(); err != nil {
+			return err
+		}
+		applyPersonaToRoot(cmd.Root())
+		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
@@ -92,6 +95,22 @@ and command-line flags.`,
 
 // Execute runs the root command.
 func Execute() error {
+	if persona := config.PersonaName(); persona != "" {
+		name := "hack-" + persona
+		rootCmd.Use = name + " [filter]"
+		envPrefix := "HACK_" + strings.ToUpper(strings.ReplaceAll(persona, "-", "_"))
+		rootCmd.Long = fmt.Sprintf(`%s is a CLI tool for managing hack workspaces.
+
+When called without arguments, it outputs the path to the most recently
+modified hack directory. When called with a filter string, it finds and
+outputs the first matching directory path.
+
+Use with shell integration (run '%s bootstrap') to enable automatic
+directory changing.
+
+Configuration is read from ~/.%s.yaml, environment variables (%s_*),
+and command-line flags.`, name, name, name, envPrefix)
+	}
 	return rootCmd.Execute()
 }
 
@@ -272,6 +291,27 @@ func scoreMatch(name, filter string) int {
 
 	// General substring match
 	return 10
+}
+
+// applyPersonaToRoot updates the root command's Use and Long text to reflect
+// the resolved persona, so help output shows the correct binary name.
+func applyPersonaToRoot(cmd *cobra.Command) {
+	name := config.C.BinaryName()
+	if name == "hack" {
+		return
+	}
+	cmd.Use = name + " [filter]"
+	cmd.Long = fmt.Sprintf(`%s is a CLI tool for managing hack workspaces.
+
+When called without arguments, it outputs the path to the most recently
+modified hack directory. When called with a filter string, it finds and
+outputs the first matching directory path.
+
+Use with shell integration (run '%s bootstrap') to enable automatic
+directory changing.
+
+Configuration is read from ~/.%s.yaml, environment variables (%s_*),
+and command-line flags.`, name, name, name, config.EnvPrefix())
 }
 
 // completeWorkspaces provides shell completion for workspace names.
